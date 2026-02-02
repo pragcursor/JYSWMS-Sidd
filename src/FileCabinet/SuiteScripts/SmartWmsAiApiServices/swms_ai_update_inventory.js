@@ -177,11 +177,9 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
             var rec = context.newRecord;
             var form = context.form;
 
-            var memoText = rec.getValue({ fieldId: 'custbody_jyswms__returns_captured_url' });
+            var Image_array = rec.getValue({ fieldId: 'custbody_jyswms__returns_captured_url' });
 
-            if (!memoText || memoText.indexOf('Item:') === -1) {
-                return;
-            }
+
 
             // Add Subtab
             var subtab = form.addSubtab({
@@ -189,6 +187,48 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                 label: 'RMA Item Images'
             });
 
+            var custom_status = rec.getValue({ fieldId: 'custbody_jyswms_rma_status' });
+            if (custom_status) {
+                //log.debug("RMA Custom Status", custom_status);
+                var statusField = form.addField({
+                    id: 'custpage_rma_status',
+                    type: serverWidget.FieldType.INLINEHTML,
+                    label: 'JYSWMS - RMA Status'
+                });
+
+                var bgColor = '#ccc'; // default fallback
+                var textColor = '#ffffff';
+
+                if (custom_status === 'RE-SALE') {
+                    bgColor = '#4d8d57'; // green
+                } else if (custom_status === 'DAMAGE') {
+                    bgColor = '#e24f4f'; // red
+                }
+
+                statusField.defaultValue = `
+                <div style="
+                    margin-top:10px;
+                    margin-bottom:20px;
+                    display:inline-block;
+                    padding:6px 14px;
+                    font-size:14px;
+                    font-weight:600;
+                    color:${textColor};
+                    background-color:${bgColor};
+                    border-radius:14px;
+                    white-space:nowrap;
+                 ">
+                    RMA JYSWMS Status: ${custom_status}
+                    </div>
+                 `;
+
+                statusField.updateLayoutType({
+                    layoutType: serverWidget.FieldLayoutType.OUTSIDEABOVE
+                });
+            }
+            if (!Image_array || Image_array.indexOf('Item:') === -1) {
+                return;
+            }
             // Add Inline HTML field
             var htmlField = form.addField({
                 id: 'custpage_rma_images_html',
@@ -198,10 +238,10 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
             });
 
             // Normalize wrapped text
-            memoText = memoText.replace(/\s+/g, ' ').trim();
+            Image_array = Image_array.replace(/\s+/g, ' ').trim();
 
             // Split by Item:
-            var itemBlocks = memoText.split(/Item:/).filter(Boolean);
+            var itemBlocks = Image_array.split(/Item:/).filter(Boolean);
 
             var html = `
             <style>

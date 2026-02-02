@@ -4,52 +4,64 @@
  */
 define(['N/record', 'N/log'], function (record, log) {
 
-    var locRma = '';
-    // if (locRma == 15) {
-    //     const STATIC_RESALE_BIN_ID = 16735;
-    // } else if (locRma == 9) {
-    //     const STATIC_RESALE_BIN_ID = 4963;
-    // }
-
+    /* =========================
+       ENTRY POINT
+       ========================= */
     function processReturn(payload) {
         var results = [];
         var hasFailure = false;
-       // log.error("payload received", payload);
-        // var body = Array.isArray(payload)
-        //     ? payload
-        //     : JSON.parse(payload);
 
         var body = payload;
-
-
-        log.error("payload", body);
-       // return { 'test': 'test' };
 
         body.forEach(function (orderObj) {
             try {
                 var soId = orderObj.soId;
                 var items = orderObj.items || [];
 
-                var rmaId = createRMA(soId, items);
-                var irId = createItemReceipt(rmaId, items);
-
-                results.push({
-                    salesOrderId: Number(soId),
-                    returnAuthorizationId: rmaId,
-                    itemReceiptId: irId,
-                    status: 'SUCCESS'
+                var damageItems = items.filter(function (i) {
+                    return i.item_return_type &&
+                        i.item_return_type.toUpperCase() === 'DAMAGE';
                 });
+
+                var resaleItems = items.filter(function (i) {
+                    return i.item_return_type &&
+                        i.item_return_type.toUpperCase() === 'RE-SALE';
+                });
+
+                if (damageItems.length) {
+                    var damageRmaId = createRMA(soId, damageItems, 'DAMAGE');
+                    var damageIrId = createItemReceipt(damageRmaId, damageItems, 'DAMAGE');
+
+                    results.push({
+                        salesOrderId: Number(soId),
+                        returnAuthorizationId: damageRmaId,
+                        itemReceiptId: damageIrId,
+                        returnType: 'DAMAGE',
+                        status: 'SUCCESS'
+                    });
+                }
+
+                if (resaleItems.length) {
+                    var resaleRmaId = createRMA(soId, resaleItems, 'RE-SALE');
+                    var resaleIrId = createItemReceipt(resaleRmaId, resaleItems, 'RE-SALE');
+
+                    results.push({
+                        salesOrderId: Number(soId),
+                        returnAuthorizationId: resaleRmaId,
+                        itemReceiptId: resaleIrId,
+                        returnType: 'RE-SALE',
+                        status: 'SUCCESS'
+                    });
+                }
 
             } catch (e) {
                 hasFailure = true;
-
                 log.error('Return failed for SO ' + orderObj.soId, e);
 
                 results.push({
                     salesOrderId: Number(orderObj.soId),
                     status: 'FAILED',
-                    errorMessage: e.message || 'Unknown error',
-                    // errorStack: e.stack
+                    errorMessage: e.message || 'Unknown error'
                 });
             }
         });
@@ -60,11 +72,10 @@ define(['N/record', 'N/log'], function (record, log) {
         };
     }
 
-
     /* =========================
        RMA CREATION
        ========================= */
-    function createRMA(soId, payloadItems) {
+    function createRMA(soId, payloadItems, returnType) {
         try {
             var rmaRec = record.transform({
                 fromType: record.Type.SALES_ORDER,
@@ -73,14 +84,9 @@ define(['N/record', 'N/log'], function (record, log) {
                 isDynamic: true
             });
 
-            rmaRec.setValue({
-                fieldId: 'orderstatus',
-                value: 'B' // Pending Approval
-            });
-            locRma = rmaRec.getValue({
-                fieldId: 'location'
-            });
-            var memoBlocks = [];
+            rmaRec.setValue({ fieldId: 'orderstatus', value: 'B' });
+
+            var Imageblocks = [];
             var lineCount = rmaRec.getLineCount({ sublistId: 'item' });
 
             for (var i = lineCount - 1; i >= 0; i--) {
@@ -115,7 +121,7 @@ define(['N/record', 'N/log'], function (record, log) {
                 }
 
                 if (payloadItem.images_urls && payloadItem.images_urls.length) {
-                    memoBlocks.push(
+                    Imageblocks.push(
                         'Item: ' + payloadItem.itemName +
                         '\n' + payloadItem.images_urls.join('\n')
                     );
@@ -124,12 +130,18 @@ define(['N/record', 'N/log'], function (record, log) {
                 rmaRec.commitLine({ sublistId: 'item' });
             }
 
-            if (memoBlocks.length) {
+            if (Imageblocks.length) {
                 rmaRec.setValue({
                     fieldId: 'custbody_jyswms__returns_captured_url',
-                    value: memoBlocks.join('\n\n')
+                    value: Imageblocks.join('\n\n')
                 });
+
             }
+
+            rmaRec.setValue({
+                fieldId: 'custbody_jyswms_rma_status',
+                value: returnType
+            });
 
             return rmaRec.save({
                 enableSourcing: true,
@@ -145,7 +157,7 @@ define(['N/record', 'N/log'], function (record, log) {
     /* =========================
        ITEM RECEIPT CREATION
        ========================= */
-    function createItemReceipt(rmaId, payloadItems) {
+    function createItemReceipt(rmaId, payloadItems, returnType) {
         try {
             var irRec = record.transform({
                 fromType: record.Type.RETURN_AUTHORIZATION,
@@ -154,6 +166,7 @@ define(['N/record', 'N/log'], function (record, log) {
                 isDynamic: true
             });
 
+            var locRma = irRec.getValue({ fieldId: 'location' });
             var lineCount = irRec.getLineCount({ sublistId: 'item' });
 
             for (var i = 0; i < lineCount; i++) {
@@ -178,15 +191,13 @@ define(['N/record', 'N/log'], function (record, log) {
                     continue;
                 }
 
-                var isResale = payloadItem.item_return_type.toUpperCase() === 'RE-SALE';
-
                 irRec.setCurrentSublistValue({
                     sublistId: 'item',
                     fieldId: 'quantity',
                     value: payloadItem.return_qty
                 });
 
-                if (isResale) {
+                if (returnType === 'RE-SALE') {
                     irRec.setCurrentSublistValue({
                         sublistId: 'item',
                         fieldId: 'itemreceive',
@@ -207,6 +218,7 @@ define(['N/record', 'N/log'], function (record, log) {
                     inventoryDetail.selectNewLine({
                         sublistId: 'inventoryassignment'
                     });
+
                     if (locRma == 15) {
                         inventoryDetail.setCurrentSublistValue({
                             sublistId: 'inventoryassignment',
@@ -220,11 +232,6 @@ define(['N/record', 'N/log'], function (record, log) {
                             value: 4963
                         });
                     }
-                    // inventoryDetail.setCurrentSublistValue({
-                    //     sublistId: 'inventoryassignment',
-                    //     fieldId: 'binnumber',
-                    //     value: STATIC_RESALE_BIN_ID
-                    // });
 
                     inventoryDetail.setCurrentSublistValue({
                         sublistId: 'inventoryassignment',
