@@ -12,158 +12,191 @@ define(['N/record', 'N/search'], (record, search) => {
         if (![context.UserEventType.CREATE, context.UserEventType.EDIT].includes(context.type)) {
             return;
         }
+        try {
 
-        const newRec = context.newRecord;
 
-        const autoLocEnabled = newRec.getValue('custbody_jyswms_enable_auto_loc_chng');
-        const alreadyUpdated = newRec.getValue('custbody_jyswms_loc_updated');
+            const newRec = context.newRecord;
 
-        // HARD EXIT – prevents reload & infinite loop
-        if (!autoLocEnabled || alreadyUpdated) {
-            return;
-        }
+            const autoLocEnabled = newRec.getValue('custbody_jyswms_enable_auto_loc_chng');
+            const alreadyUpdated = newRec.getValue('custbody_jyswms_loc_updated');
 
-        const soId = newRec.id;
-        const soType = newRec.type;
-        //log.debug('SO Auto Location Change', `Processing SO ID: ${soId}`);
-        // Load record ONCE
-        const so = record.load({
-            type: soType,
-            id: soId,
-            isDynamic: false
-        });
+            // HARD EXIT – prevents reload & infinite loop
+            if (!autoLocEnabled || alreadyUpdated) {
+                return;
+            }
 
-        const lineCount = so.getLineCount({ sublistId: 'item' });
-        if (!lineCount) return;
-
-        const itemSet = new Set();
-
-        // Collect inventory items only
-        for (let i = 0; i < lineCount; i++) {
-            const itemType = so.getSublistValue({
-                sublistId: 'item',
-                fieldId: 'itemtype',
-                line: i
+            const soId = newRec.id;
+            const soType = newRec.type;
+            //log.debug('SO Auto Location Change', `Processing SO ID: ${soId}`);
+            // Load record ONCE
+            const so = record.load({
+                type: soType,
+                id: soId,
+                isDynamic: false
             });
 
-            if (itemType === 'InvtPart') {
+            const lineCount = so.getLineCount({ sublistId: 'item' });
+            if (!lineCount) return;
+
+            const itemSet = new Set();
+
+            // Collect inventory items only
+            for (let i = 0; i < lineCount; i++) {
+                const itemType = so.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'itemtype',
+                    line: i
+                });
+
+                if (itemType === 'InvtPart') {
+                    const itemId = so.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'item',
+                        line: i
+                    });
+                    if (itemId) itemSet.add(itemId);
+                }
+            }
+
+            log.debug('itemSet', JSON.stringify(itemSet));
+            log.debug('lineCount', lineCount);
+            if (!itemSet.size) return;
+
+            // Inventory availability map: { itemId: { locationId: availableQty } }
+            const inventoryMap = {};
+
+            search.create({
+                type: 'inventorybalance',
+                filters: [
+                    ['item', 'anyof', [...itemSet]],
+                    'AND',
+                    ['location', 'anyof', [LOC_HARDEE, LOC_FLEMINGTON]],
+                    'AND',
+                    ['available', 'greaterthan', '0'],
+                    "AND",
+                    ["binnumber.custrecord_jyswms_exclude_from_inventory", "is", "F"]
+                ],
+                columns: ['item', 'location', 'available']
+            }).run().each(result => {
+                const itemId = result.getValue('item');
+                const locId = result.getValue('location');
+                const qty = parseFloat(result.getValue('available')) || 0;
+
+                if (!inventoryMap[itemId]) {
+                    inventoryMap[itemId] = {};
+                }
+                inventoryMap[itemId][locId] = qty;
+                return true;
+            });
+            log.debug('Inventory Map', JSON.stringify(inventoryMap));
+            let anyLineUpdated = false;
+            let newHeaderLocation = null;
+            for (let i = 0; i < lineCount; i++) {
+
+                const itemType = so.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'itemtype',
+                    line: i
+                });
+                log.debug('itemType', itemType);
+                if (itemType !== 'InvtPart') continue;
+
                 const itemId = so.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'item',
                     line: i
                 });
-                if (itemId) itemSet.add(itemId);
-            }
-        }
+                log.debug('inventoryMap[itemId]', inventoryMap[itemId]);
+                if (!inventoryMap[itemId]) continue;
 
-        if (!itemSet.size) return;
+                const qtyRequired = parseFloat(
+                    so.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantity',
+                        line: i
+                    })
+                ) || 0;
 
-        // Inventory availability map: { itemId: { locationId: availableQty } }
-        const inventoryMap = {};
-
-        search.create({
-            type: 'inventorybalance',
-            filters: [
-                ['item', 'anyof', [...itemSet]],
-                'AND',
-                ['location', 'anyof', [LOC_HARDEE, LOC_FLEMINGTON]],
-                'AND',
-                ['available', 'greaterthan', '0']
-            ],
-            columns: ['item', 'location', 'available']
-        }).run().each(result => {
-            const itemId = result.getValue('item');
-            const locId = result.getValue('location');
-            const qty = parseFloat(result.getValue('available')) || 0;
-
-            if (!inventoryMap[itemId]) {
-                inventoryMap[itemId] = {};
-            }
-            inventoryMap[itemId][locId] = qty;
-            return true;
-        });
-       // log.debug('Inventory Map', JSON.stringify(inventoryMap));
-        let anyLineUpdated = false;
-
-        for (let i = 0; i < lineCount; i++) {
-
-            const itemType = so.getSublistValue({
-                sublistId: 'item',
-                fieldId: 'itemtype',
-                line: i
-            });
-            if (itemType !== 'InvtPart') continue;
-
-            const itemId = so.getSublistValue({
-                sublistId: 'item',
-                fieldId: 'item',
-                line: i
-            });
-
-            if (!inventoryMap[itemId]) continue;
-
-            const qtyRequired = parseFloat(
-                so.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'quantity',
-                    line: i
-                })
-            ) || 0;
-
-            const currentLoc = so.getSublistValue({
-                sublistId: 'item',
-                fieldId: 'location',
-                line: i
-            });
-
-            // Inventory exists at current location
-            if (
-                inventoryMap[itemId][currentLoc] &&
-                inventoryMap[itemId][currentLoc] >= qtyRequired
-            ) {
-                continue;
-            }
-
-            const alternateLoc =
-                currentLoc === LOC_HARDEE ? LOC_FLEMINGTON : LOC_HARDEE;
-
-            if (
-                inventoryMap[itemId][alternateLoc] &&
-                inventoryMap[itemId][alternateLoc] >= qtyRequired
-            ) {
-                so.setSublistValue({
+                const currentLoc = so.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'location',
-                    line: i,
-                    value: alternateLoc
+                    line: i
                 });
-                anyLineUpdated = true;
-            }
-        }
 
-        // Save only if changes were made
-        if (anyLineUpdated) {
-            so.setValue({
-                fieldId: 'custbody_jyswms_loc_updated',
-                value: true
-            });
-            log.audit('SO Auto Location Change', `Saving SO ID: ${soId} with location changes.`);
-            so.save({
-                enableSourcing: false,
-                ignoreMandatoryFields: true
-            });
-        } else {
-            var submit = record.submitFields({
-                type: soType,
-                id: soId,
-                values: {
-                    custbody_jyswms_loc_updated: true
-                },
-                options: {
+                // Inventory exists at current location
+                if (
+                    inventoryMap[itemId][currentLoc] &&
+                    inventoryMap[itemId][currentLoc] >= qtyRequired
+                ) {
+                    continue;
+                }
+
+                const alternateLoc =
+                    currentLoc === LOC_HARDEE ? LOC_FLEMINGTON : LOC_HARDEE;
+
+                log.debug('alternateLoc', alternateLoc);
+                log.debug(itemId,'qtyRequired='+qtyRequired+',currentLoc'+ inventoryMap[itemId][currentLoc]+', Alternate='+ inventoryMap[itemId][alternateLoc] )
+
+                if (
+                    inventoryMap[itemId][alternateLoc] &&
+                    inventoryMap[itemId][alternateLoc] >= qtyRequired
+                ) {
+                    log.debug('inventoryMap[itemId][alternateLoc] >= qtyRequired', inventoryMap[itemId][alternateLoc] >= qtyRequired);
+                    so.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'location',
+                        line: i,
+                        value: alternateLoc
+                    });
+                    so.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jyswms_line_location',
+                        line: i,
+                        value: true
+                    });
+                    anyLineUpdated = true;
+
+                    // Track header location ONLY if single-line SO
+                    if (lineCount === 1) {
+                        newHeaderLocation = alternateLoc;
+                    }
+                }
+
+            }
+
+            // Save only if changes were made
+            if (anyLineUpdated) {
+                if (lineCount === 1 && newHeaderLocation) {
+                    so.setValue({
+                        fieldId: 'location',
+                        value: newHeaderLocation
+                    });
+                  
+                }
+                so.setValue({
+                    fieldId: 'custbody_jyswms_loc_updated',
+                    value: true
+                });
+                log.audit('SO Auto Location Change', `Saving SO ID: ${soId} with location changes.`);
+                so.save({
                     enableSourcing: false,
                     ignoreMandatoryFields: true
-                }
-            });
+                });
+            } else {
+                var submit = record.submitFields({
+                    type: soType,
+                    id: soId,
+                    values: {
+                        custbody_jyswms_loc_updated: true
+                    },
+                    options: {
+                        enableSourcing: false,
+                        ignoreMandatoryFields: true
+                    }
+                });
+            }
+        } catch (error) {
+            log.error('Error in SO Auto Location Change', error);
         }
     };
 

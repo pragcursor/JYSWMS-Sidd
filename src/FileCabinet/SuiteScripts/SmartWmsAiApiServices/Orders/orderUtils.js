@@ -70,13 +70,15 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                         "AND",
                         ["custbody_reason_approval", "doesnotcontain", "PARTS"],
                         "AND",
-                        ["custbody_jyswms_send_order", "is", "T"],
+                        ["customer.custentity_jyswms_enable", "is", "T"],
                         "AND",
                         ["location", "anyof", "15", "9"],
                         "AND",
                         ["custbody_bol_tracking_number", "isempty", ""],
                         "AND",
-                        ["shipmethod", "anyof", "57733"]
+                        ["shipmethod", "anyof", "57733"],
+                        "AND",
+                        ["status", "noneof", "SalesOrd:C", "SalesOrd:G", "SalesOrd:H", "SalesOrd:A"]
                         // "OR",
                         // ["internalid", "anyof",  "61534317"]
                         // "OR",
@@ -421,7 +423,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                 id: soId,
                 values: {
                     custbody50: data.palletSize || 0,
-                    custbody46: data.palletCount || 0, 
+                    custbody46: data.palletCount || 0,
                     custbody35: data.palletCount || 0, // total pallet count
                     custbody_jyswms_status: data.status || "",
                     custbody_wms_current_picked_qty: data.palletSize || 0  // 
@@ -520,7 +522,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                     values: {
                         custbody_bol_tracking_number: bolNumber,
                         custbody35: palletCount,
-                     // custbody46: palletCount,
+                        // custbody46: palletCount,
                         custbody_wms_bol_tracking_image: fileId
                     },
                     options: {
@@ -815,7 +817,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                     fieldId: 'custrecordhj_pkg_pallet',
                     value: palletKey
                 });
-                
+
                 packageRec.setValue({
                     fieldId: 'custrecordhj_pkgbox',
                     value: boxCounter.toString()
@@ -849,12 +851,12 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                 // Sublist line - item must be internal id; lookup from itemObj
                 var itemInternalId = (itemdetails && itemdetails.internalId) ? itemdetails.internalId : (line.item || null);
 
-                 packageRec.setValue({
+                packageRec.setValue({
                     fieldId: 'custrecord_jyswms_item_id',
                     value: itemInternalId
                 });
 
-              
+
                 var package_Content = itemId + "/1";
                 // Tracking number
                 packageRec.setValue({
@@ -3369,7 +3371,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                     }),
 
                     vendorName: vendorName,
-                   vendorId: result.getValue({
+                    vendorId: result.getValue({
                         name: "internalid",
                         join: "vendor",
                         label: "vendor id"
