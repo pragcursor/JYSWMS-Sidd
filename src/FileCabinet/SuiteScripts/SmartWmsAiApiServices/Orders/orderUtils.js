@@ -78,12 +78,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                         "AND",
                         ["shipmethod", "anyof", "57733"],
                         "AND",
-                        ["status", "noneof", "SalesOrd:C", "SalesOrd:G", "SalesOrd:H", "SalesOrd:A"]
-                        // "OR",
-                        // ["internalid", "anyof",  "61534317"]
-                        // "OR",
-                        // ["internalid", "anyof",  "59478153", "59479721"]
-                        // ["internalid","anyof","59479721","59478153"]
+                        ["status", "noneof", "SalesOrd:A", "SalesOrd:C", "SalesOrd:H"]
                     ],
                     columns: [
                         search.createColumn({ name: "internalid", summary: "GROUP" }),

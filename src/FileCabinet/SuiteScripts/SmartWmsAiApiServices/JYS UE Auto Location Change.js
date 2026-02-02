@@ -152,7 +152,7 @@ define(['N/record', 'N/search'], (record, search) => {
                         sublistId: 'item',
                         fieldId: 'custcol_jyswms_line_location',
                         line: i,
-                        value: true
+                        value: alternateLoc
                     });
                     anyLineUpdated = true;
 
