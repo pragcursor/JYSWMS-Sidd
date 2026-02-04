@@ -1,166 +1,15 @@
 /**
- * @NApiVersion 2.1
- * @NScriptType UserEventScript
+ * @NApiVersion 2.x
+ * @NModuleScope Public
  */
-define([
-    'N/record',
-    'N/error',
-    'N/log',
-    'N/search',
-    'N/runtime',
-    'N/https',
-    './Bin/binUtils',
-    './Orders/orderUtils',
-  './markAsPicked/markAsPickedUtil'
-], function (record, error, log, search, runtime, https, binUtils, orderUtils,markAsPickedUtil) {
+define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search, log, runtime) {
 
-    function afterSubmit(context) {
-
-        const rec = context.newRecord;
-
-        const wasChecked = rec.getValue('custrecord_wms_ai_api_custrec_processing');
-
-
-        if (!wasChecked) {
-           
-            return;
-        }
-
-        if (context.type !== context.UserEventType.EDIT) {
-            log.debug("Skipped", "Not an EDIT event");
-            return;
-        }
-
-       
-
-        const customRecId = rec.id;
-       log.debug("wasChecked", customRecId);
-
-        try {
-            const fullRecord = record.load({
-                type: 'customrecord_wms_ai_api_custom_rec',
-                id: customRecId,
-                isDynamic: false
-            });
-
-            const jsonString = fullRecord.getValue('custrecordwms_ai_api_custrec_json_data');
-            const action = fullRecord.getValue('custrecordwms_ai_api_custrec_action');
-
-            log.debug("Action", action);
-
-            if (!jsonString) {
-                log.error('Missing JSON', 'No JSON data found in custrecordwms_ai_api_custrec_json_data');
-                return;
-            }
-
-            let jsonData;
-            try {
-                jsonData = JSON.parse(jsonString);
-                log.error('JSON', jsonData);
-            } catch (err) {
-                log.error('Invalid JSON', err.message);
-                return;
-            }
-
-            let result = null;
-
-            switch (action) {
-                case 'markAsPicked':
-                    result = markAsPickedUtil.markAsPicked(jsonData, customRecId);
-                    break;
-                case 'fullfillOrders':
-                    result = FullFillOrders(context); // Make sure this function exists and is defined
-                    break;
-                case 'binCount':
-                    result = binUtils.binCount(jsonData, customRecId);
-                    break;
-                case 'binAdjustment':
-                    result = binUtils.binAdjustment(jsonData, customRecId);
-                    break;
-                case 'binTransfer':
-                    result = binUtils.binTransfer(jsonData, customRecId);
-                    break;
-                case 'receiveInbound':
-                    result = orderUtils.transformInboundShipmentToItemReceipt(jsonData, customRecId);
-                    try {
-                        var inboundId = result.itemReceiptId;
-                        log.error("get restlet inboundId ", inboundId);
-
-
-                        if (!inboundId) {
-                            log.error("No inbound if blockinboundId", inboundId);
-                            inboundId = jsonData.inboundShipmentId
-                        }
-
-                        if (!inboundId) {
-                            log.error("return response", inboundId);
-                            return result;
-                        }
-
-                        log.error(" inboundId", inboundId);
-                        // log.error("Internal IDs", JSON.stringify(inboundShipmentID));
-                        var params = {
-                            inboundShipmentID: inboundId,
-                            pageSize: 1000
-                        };
-
-                        var startIndex = 0;
-                        var pageSize = 1000;
-
-                        var response = orderUtils.getInboundRecords(params, pageSize, startIndex);
-
-                        var status = sendData(response);
-                    }
-                    catch (e) {
-                        log.error("error message", e.message);
-                    }
-
-
-                    break;
-                default:
-                    log.error('Invalid action', `Action "${action}" is not supported.`);
-                    return;
-            }
-
-fullRecord.setValue({
-    fieldId: 'custrecord_wms_ai_api_custrec_response',
-    value: JSON.stringify(result)
-});
-
-            log.error("Result from action", result);
-
-            if (result && result.success === true) {
-                var Reprocessing = fullRecord.getValue({
-                    fieldId: 'custrecord_wms_ai_api_custrec_processing'
-                });
-                var status = fullRecord.getValue({
-                    fieldId: 'custrecord_wms_ai_api_custrec_status'
-                });
-                log.error('Reprocessing & Status', `Processing: ${Reprocessing}, Status: ${status}`);
-
-            }
-            else {
-
-                var Reprocessing1 = fullRecord.getValue({
-                    fieldId: 'custrecord_wms_ai_api_custrec_processing'
-                });
-                var status1 = fullRecord.getValue({
-                    fieldId: 'custrecord_wms_ai_api_custrec_status'
-                });
-                log.error('Reprocessing1 & Status1', `Processing: ${Reprocessing1}, Status: ${status1}`);
-
-            }
-
-        } catch (e) {
-            log.error('Error in afterSubmit', e.message);
-        }
-    }
-
-
-    
-    function markAsPicked(requestBody,custid) {
+    function markAfullFillPartsOrsersPicked(requestBody, jyswmsApiCustRecId) {
         var headerId = null;
         try {
+
+            const startTime = new Date().getTime();
+
             log.error('Incoming Data - MarkAsPicked', JSON.stringify(requestBody));
             var savedTransfers = [];
             var savedHeaders = [];
@@ -171,7 +20,8 @@ fullRecord.setValue({
             var headerSearch = search.create({
                 type: 'customrecord_order_fulfillment_details',
                 filters: [
-                    // ['custrecord_jyswms_approved', 'is', 'F'], 'AND',
+                    ["custrecord_jyswms_rel_item_ful", "anyof", "@NONE@"],
+                    'AND',
                     ["isinactive", "is", "F"]
                     // , 'AND',
                     //  ['custrecord_jyswms_carrier_pro_number', 'isempty']
@@ -182,7 +32,6 @@ fullRecord.setValue({
                 existingMap[result.getValue('custrecord_jyswms_sales_order_id')] = result.id;
                 return true;
             });
-
             log.audit('Existing SO Map', JSON.stringify(existingMap));
 
             // Validate request body structure
@@ -208,6 +57,26 @@ fullRecord.setValue({
 
                     var so = salesOrders[i];
                     var salesOrderId = so.salesOrderId;
+
+                    try {
+                        if (salesOrderId && jyswmsApiCustRecId) {
+                            record.submitFields({
+                                type: 'customrecord_wms_ai_api_custom_rec',
+                                id: jyswmsApiCustRecId,
+                                values: {
+                                    custrecord_jyswms_related_tran_record: salesOrderId
+                                },
+                                options: {
+                                    enableSourcing: false,
+                                    ignoreMandatoryFields: true
+                                }
+                            });
+                        }
+
+                    } catch (error) {
+                        log.error("error setting the so", error.message)
+                    }
+
 
 
                     if (!salesOrderId) continue;
@@ -238,6 +107,9 @@ fullRecord.setValue({
                     var portalId = requestBody.portalId || requestBody.portalid;
                     var pickerName = requestBody.userName || requestBody.username || requestBody.pickerName;
 
+
+
+
                     var trackingNumbers = [];
 
                     // --- Extract tracking numbers safely ---
@@ -258,19 +130,19 @@ fullRecord.setValue({
                     log.error("ssccList", ssccList);
 
 
-                   if (so.packing_slip) {
-                     trackingList = [];
+                    if (so.packing_slip) {
+                        trackingList = [];
 
                         trackingList = (so.labelData || [])
-                        .map(function (l) {
-                            return  l.tracking_number || "";
-                        })
-                        .filter(Boolean);
+                            .map(function (l) {
+                                return l.tracking_number || "";
+                            })
+                            .filter(Boolean);
 
-                      }
+                    }
 
                     // --- CASE 1: labelData2 exists → pair by index ---
-                    if (ssccList.length && trackingList.length &&  !so.packing_slip) {
+                    if (ssccList.length && trackingList.length && !so.packing_slip) {
 
                         var pairCount = Math.min(trackingList.length, ssccList.length);
 
@@ -283,30 +155,35 @@ fullRecord.setValue({
 
                     }
                     // --- CASE 2: labelData2 does NOT exist → tracking only ---
-                       else if (!so.packing_slip) { 
+                    else if (!so.packing_slip) {
                         trackingList.forEach(function (tn) {
                             trackingNumbers.push({
                                 ssccCode: tn,       // fallback behavior
                                 trackingNumber: ""
                             });
                         });
-                    }  
+                    }
                     else {
                         trackingList.forEach(function (tn) {
                             trackingNumbers.push({
-                               trackingNumber: tn,
+                                trackingNumber: tn,
                                 ssccCode: ""    // fallback behavi
                             });
                         });
                     }
 
-                    log.audit('Processing SO -- tracking numbers', {
+
+
+
+                    log.error("trackingNumbers", trackingNumbers);
+
+
+                    log.audit('Processing SO', {
                         salesOrderId: salesOrderId,
                         itemId: itemId,
                         binId: binId,
                         locationId: locationId,
-                        pickQty: pickQty,
-                        trackingNumbers:trackingNumbers
+                        pickQty: pickQty
                     });
 
                     // fallback lookup location if missing
@@ -352,9 +229,8 @@ fullRecord.setValue({
 
                     // STEP 3: Load or create header
                     headerId = existingMap[salesOrderId];
+                    log.error("headerId", headerId);
                     var headerRec;
-
-log.error("headerId",headerId);
                     if (headerId) {
                         headerRec = record.load({
                             type: 'customrecord_order_fulfillment_details',
@@ -369,6 +245,7 @@ log.error("headerId",headerId);
                         });
                         headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
                         headerRec.setValue('custrecord_jyswms_portal_id', portalId);
+                        headerRec.setValue('custrecord_jyswms_location_id', locationId);
                         // Save new record first to get the ID before adding lines
                         headerId = headerRec.save();
                         existingMap[salesOrderId] = headerId;
@@ -415,6 +292,9 @@ log.error("headerId",headerId);
                                 toBin: bulkStageBin
                             });
 
+                            // Save bin transfer with error handling
+                            // var savedId = null;
+
                             try {
                                 savedId = binTransferRec.save();
                             } catch (e) {
@@ -441,7 +321,21 @@ log.error("headerId",headerId);
                         isDynamic: true
                     });
 
-                    // STEP 6: Add header lines
+                    try {
+
+                        var singleIf = headerRec.getValue('custrecord_jywms_single_if_from_customer');
+                        if (!singleIf) {
+                            headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
+                            headerRec.setValue('custrecord_jyswms_approved', true);
+                        }
+                       headerRec.setValue('custrecord_jyswms_location_id', locationId);
+
+                    } catch (error) {
+                        log.error("error message", error.message);
+                    }
+
+
+                    // STEP 6: Adding JYSWMS sales order Items (custom recrd lines)
                     var line = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_sales_order_header' });
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item', value: itemId });
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_order_qty', value: so.quantity });
@@ -449,14 +343,17 @@ log.error("headerId",headerId);
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_sales_order', value: salesOrderId });
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_picked_bin', value: binId });
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jswms_item_so_item_qty', value: so.item_quantity });
+                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_so_line_loc', value: locationId });
                     // Initialize inventory adjustment ID
                     var invAdjId = "";
 
                     // Wrap entire negative inventory adjustment logic in try-catch block
                     try {
                         var soItemQuantity = so.quantity;
-                    
+                        // log.error("soItemQuantity", soItemQuantity);
+
                         var userPickedQty = pickQty;
+                        //  log.error("userPickedQty", userPickedQty);
 
                         // Calculate quantity difference
                         var qtyDiff = soItemQuantity - userPickedQty;
@@ -549,8 +446,6 @@ log.error("headerId",headerId);
                                         fieldId: 'binnumber',
                                         value: binId
                                     });
-
-
                                     invDetail.setCurrentSublistValue({
                                         sublistId: 'inventoryassignment',
                                         fieldId: 'quantity',
@@ -562,8 +457,6 @@ log.error("headerId",headerId);
                                         sublistId: 'inventoryassignment',
                                         fieldId: 'binnumber'
                                     });
-
-
                                     var getQty = invDetail.getCurrentSublistValue({
                                         sublistId: 'inventoryassignment',
                                         fieldId: 'quantity'
@@ -574,7 +467,7 @@ log.error("headerId",headerId);
                                     log.audit(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
 
                                 } catch (invDetailError) {
-                                    log.error("Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
+                                    log.error("❌ Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
                                     // Continue with adjustment even if inventory detail fails
                                 }
                             } else {
@@ -634,7 +527,7 @@ log.error("headerId",headerId);
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_tracking_numbers', value: trackingNumbers.length || 0 });
                     headerRec.commitLine({ sublistId: 'recmachcustrecord_sales_order_header' });
 
-                    // STEP 7: Add tracking lines
+                    // STEP 7: Add tracking sublist lines lines
                     // log.error('Tracking Numbers', trackingNumbers);
 
                     trackingNumbers.forEach(function (track) {
@@ -662,6 +555,7 @@ log.error("headerId",headerId);
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_so_id', value: salesOrderId });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_qty', value: 1 });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_uniqueid', value: uniqueId });
+                        log.error("track.tracking number", track.trackingNumber)
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_dropship', value: track.trackingNumber || " " });
                         headerRec.commitLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
                     });
@@ -679,7 +573,6 @@ log.error("headerId",headerId);
                     //  Calculate total picked quantity from all item lines
                     var totalPickedQty = 0;
                     var lineCount = headerRec.getLineCount({ sublistId: 'recmachcustrecord_sales_order_header' });
-
                     for (var l = 0; l < lineCount; l++) {
                         var linePicked = Number(headerRec.getSublistValue({
                             sublistId: 'recmachcustrecord_sales_order_header',
@@ -717,8 +610,22 @@ log.error("headerId",headerId);
                         if (savedId) {
                             savedTransfers.push(savedId);
                         }
-
                         savedHeaders.push(headerId);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                     } catch (headerSaveError) {
                         log.error('Failed to save header record', {
                             error: headerSaveError.message,
@@ -733,7 +640,7 @@ log.error("headerId",headerId);
                 log.audit("MarkAsPicked", "savedTransfers: " + JSON.stringify(savedTransfers) + ", savedHeaders: " + JSON.stringify(savedHeaders));
 
             }
-         
+            const endTime = new Date().getTime();
 
             // Build expected JSON response
             const expectedResponse = {
@@ -764,9 +671,7 @@ log.error("headerId",headerId);
             return { status: 'error', message: e.message };
         }
     }
-
-
-        // dependency for markaspicked function
+//depen
     function getBinNameToIdMap() {
         try {
             var binMap = {};
@@ -806,8 +711,7 @@ log.error("headerId",headerId);
             return {};
         }
     }
-        // Check if SSCC code already exists in the header sublist
-        // depency for markaspicked function
+
     function ssccExistsInSublist(headerRec, ssccCode) {
         var sublistId = 'recmachcustrecord_jyswms_so_header';
         var lineCount = headerRec.getLineCount({ sublistId: sublistId });
@@ -826,10 +730,6 @@ log.error("headerId",headerId);
         return false;
     }
 
-
-
-//dependency for markaspicked function
-
     /**
    * Treat various truthy inputs (boolean true, "true", "True", "1") as true.
    */
@@ -847,8 +747,6 @@ log.error("headerId",headerId);
      * Close matching item lines on a sales order.
      * This is called when the payload sends isClose=true.
      */
-
-    // dependency for markaspicked function
     function closeSalesOrderItem(salesOrderId, itemId, uniqueId) {
         try {
             var soRec = record.load({
@@ -908,99 +806,9 @@ log.error("headerId",headerId);
         }
     }
 
-function toSnakeCase(str) {
-    return str
-        .trim()
-        .replace(/[^a-zA-Z0-9 ]/g, '')
-        .replace(/\s+/g, '_')
-        .toLowerCase();
-}
-
-    function generateToken() {
-        try {
-            var webhookUrl = 'https://api.jyswms.com/user/login'; // prod Url
-            var token = "";
-
-            // Convert object to x-www-form-urlencoded string
-            var formData = { userid: "jyswms_integration_user", password: "s9u[7zC720%pZr" };
-            log.error("formData ", formData);
-
-            var headerObj = {
-                'Content-Type': 'application/json'
-            };
-
-            try {
-                var response = https.post({
-                    url: webhookUrl,
-                    body: JSON.stringify(formData),
-                    headers: headerObj
-                });
-
-                log.error("response", JSON.stringify(response));
-
-                log.error('Response Body', response.body);
-                var responseBody = response.body;
-                var parsedBody = JSON.parse(responseBody); // Convert JSON string to object
-                log.error("parsedBody", parsedBody);
-                token = parsedBody.access_token;
-                log.error("token", token);
-
-            } catch (e) {
-                log.error('Error while sending request', e.message);
-            }
-
-
-
-            return token;
-
-        }
-        catch (e) {
-            log.error('Error in hash generation', e);
-            return {
-                success: false,
-                error: e.message
-            };
-        }
-    }
-
-    function sendData(body) {
-
-        try {
-            const webhookUrl = 'https://api.jyswms.com/update-inbound-shipment-id';
-            // custsecret_wms_ai_portal_credientals
-            const requestBody = body;
-            var token = generateToken();
-
-            log.error("token", token);
-            log.error("result", JSON.stringify(body));
-            const headers = {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            };
-
-            const response = https.post({
-                url: webhookUrl,
-                body: JSON.stringify(requestBody),
-                headers: headers
-            });
-            log.error("response", JSON.stringify(response));
-            return {
-                success: true,
-                response: response
-            };
-
-        }
-        catch (e) {
-            log.error('Error sendData', e);
-            return {
-                success: false,
-                error: e.message
-            };
-        }
-    }
-
+   
 
     return {
-        afterSubmit
+        fullFillPartsOrder: markAfullFillPartsOrsersPicked
     };
 });

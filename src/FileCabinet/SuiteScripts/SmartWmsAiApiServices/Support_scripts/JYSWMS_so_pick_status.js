@@ -25,7 +25,7 @@ define([
             // if (recId !== 62395735) { // Test SO ID, remove this line in production
             //     return;
             // }
-            log.debug('afterSubmit', 'Record Type: ' + recType + ', Record ID: ' + recId);
+            // log.debug('afterSubmit', 'Record Type: ' + recType + ', Record ID: ' + recId);
 
             var isJysWmsEnabled = search.lookupFields({
                 type: record.Type.CUSTOMER,
@@ -44,12 +44,12 @@ define([
             }
 
             if (!apiResult.response) {
-                log.error('API Error', 'Empty response');
+               // log.error('API Error', 'Empty response');
                 return;
             }
 
             var responseObj = JSON.parse(apiResult.response || '{}');
-           // log.debug('API Response', JSON.stringify(responseObj));
+           log.debug('API Response', JSON.stringify(responseObj));
             var sourceArray = [];
             if (responseObj.completed && responseObj.completed.length > 0) {
                 sourceArray = responseObj.completed;
@@ -58,7 +58,7 @@ define([
             }
             //log.debug('Source Array', JSON.stringify(sourceArray));
             if (sourceArray.length === 0) {
-                log.debug('No Data', 'No completed or notcompleted records found');
+               // log.debug('No Data for Record ID ' + recId, 'No completed or notcompleted records found');
                 return;
             }
 

@@ -16,50 +16,52 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var itemFulfill = newRec.getValue({ fieldId: 'custrecord_jyswms_rel_item_ful' });
             var salesOrderId = newRec.getValue({ fieldId: 'custrecord_jyswms_sales_order_id' });
             var headerPickedQty = newRec.getValue({ fieldId: 'custrecord_jyswms_total_pick_qty' });
-            var totalSoQuantity = newRec.getValue({ fieldId: 'custrecord_jyswms_total_so_qty' });  
-            var fulfillPartilly = newRec.getValue({ fieldId: 'custrecord_jyswms_is_partially_fulfilled' });  
+            var totalSoQuantity = newRec.getValue({ fieldId: 'custrecord_jyswms_total_so_qty' });
+            var fulfillPartilly = newRec.getValue({ fieldId: 'custrecord_jyswms_is_partially_fulfilled' });
+            var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' });
+            var lineLineLocation = "";
 
-           if (fulfillPartilly && !isApproved ) {
+            if (fulfillPartilly && !isApproved) {
 
-             record.submitFields({
-                        type: 'customrecord_order_fulfillment_details',
-                        id: recordId,
-                        values: {
-                            custrecord_jyswms_approved: true
-                        }
-                    });
-            // return;
-          }
+                record.submitFields({
+                    type: 'customrecord_order_fulfillment_details',
+                    id: recordId,
+                    values: {
+                        custrecord_jyswms_approved: true
+                    }
+                });
+                // return;
+            }
 
-          
 
-          if (headerPickedQty < totalSoQuantity && !fulfillPartilly) {
-            return;
-          }
 
-          if(!isApproved ){
-            return;
-          }
+            if (headerPickedQty < totalSoQuantity && !fulfillPartilly) {
+                return;
+            }
+
+            if (!isApproved) {
+                return;
+            }
 
             log.error('Trigger Info', {
                 recordId: recordId,
                 isApproved: isApproved,
                 itemFulfill: itemFulfill,
                 salesOrderId: salesOrderId,
-                totalSoQuantity:totalSoQuantity
+                totalSoQuantity: totalSoQuantity
             });
 
-           if (isApproved && !itemFulfill && salesOrderId) {
-           //  if (isApproved && itemFulfill && salesOrderId) {
+            if (isApproved && !itemFulfill && salesOrderId) {
+                //  if (isApproved && itemFulfill && salesOrderId) {
 
 
-                var locationLookup = search.lookupFields({
-                    type: search.Type.SALES_ORDER,
-                    id: salesOrderId,
-                    columns: ['location']
-                });
+                // var locationLookup = search.lookupFields({
+                //     type: search.Type.SALES_ORDER,
+                //     id: salesOrderId,
+                //     columns: ['location']
+                // });
 
-                var locationId = locationLookup.location.length ? locationLookup.location[0].value : null;
+                // var locationId = locationLookup.location.length ? locationLookup.location[0].value : null;
 
                 // var weightLookup = search.lookupFields({
                 //         type: search.Type.ITEM,
@@ -96,6 +98,12 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     var linePickedQty = Number(newRec.getSublistValue({
                         sublistId: 'recmachcustrecord_sales_order_header',
                         fieldId: 'custrecord_jyswms_item_picked_qty',
+                        line: i
+                    })) || 0;
+
+                    lineLineLocation = Number(newRec.getSublistValue({
+                        sublistId: 'recmachcustrecord_sales_order_header',
+                        fieldId: 'custrecord_jyswms_item_so_line_loc',
                         line: i
                     })) || 0;
 
@@ -136,7 +144,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                             selected: true,
                             itemId: itemId,
                             quantity: linePickedQty,
-                            locationId: locationId,
+                            locationId: lineLineLocation,
                             bins: binName ? [{ binId: binName }] : []
                         };
                     }
@@ -147,29 +155,29 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 // ✅ Validate totals
                 if (headerPickedQty !== totalQuantity) {
 
-                  if (totalQuantity ==  totalSoQuantity) {
-                    
-                    record.submitFields({
-                        type: 'customrecord_order_fulfillment_details',
-                        id: recordId,
-                        values: {
-                            custrecord_jyswms_total_pick_qty: totalQuantity
-                        }
-                    });
-                    
-                  }
-                  else{
-                    record.submitFields({
-                        type: 'customrecord_order_fulfillment_details',
-                        id: recordId,
-                        values: {
-                            custrecord_jyswms_total_pick_qty: totalQuantity,
-                            custrecord_jyswms_approved: false
-                        }
-                    });
+                    if (totalQuantity == totalSoQuantity) {
 
-                    return;
-}
+                        record.submitFields({
+                            type: 'customrecord_order_fulfillment_details',
+                            id: recordId,
+                            values: {
+                                custrecord_jyswms_total_pick_qty: totalQuantity
+                            }
+                        });
+
+                    }
+                    else {
+                        record.submitFields({
+                            type: 'customrecord_order_fulfillment_details',
+                            id: recordId,
+                            values: {
+                                custrecord_jyswms_total_pick_qty: totalQuantity,
+                                custrecord_jyswms_approved: false
+                            }
+                        });
+
+                        return;
+                    }
                 }
 
                 log.error("FINAL MERGED LINES", JSON.stringify(lines));
@@ -235,6 +243,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 obj[salesOrderId] = {
                     salesOrderId: salesOrderId,
                     lines: lines,
+                    locationId: locationId || lineLineLocation,
                     trackingNumbers: trackingNumbers,
                     ssccCodes: ssccCodes
                 };
@@ -247,52 +256,52 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     log.error('response', JSON.stringify(response));
 
 
-       try {
-            // Load the record
-            var fulfillmentRec = record.load({
-                type: newRec.type,
-                id: newRec.id,
-                isDynamic: true
-            });
+                    try {
+                        // Load the record
+                        var fulfillmentRec = record.load({
+                            type: newRec.type,
+                            id: newRec.id,
+                            isDynamic: true
+                        });
 
 
-            // Save (submit) the record
-            var savedId = fulfillmentRec.save({
-                enableSourcing: true,
-                ignoreMandatoryFields: true
-            });
+                        // Save (submit) the record
+                        var savedId = fulfillmentRec.save({
+                            enableSourcing: true,
+                            ignoreMandatoryFields: true
+                        });
 
-            log.error('Record Saved Successfully', savedId);
-       } catch (error) {
-         log.error("error",error.message)
-       }
+                        log.error('Record Saved Successfully', savedId);
+                    } catch (error) {
+                        log.error("error", error.message)
+                    }
 
 
-                  
+
                 }
 
 
             }
 
-            //  if (itemFulfill) {
+             if (itemFulfill) {
 
-            //     var suiteletUrl = url.resolveScript({
-            //         scriptId: 'customscript_jy_load_submit_records',      // INTERNAL SCRIPT ID
-            //         deploymentId: 'customdeploy_jy_load_submit_records',     // INTERNAL DEPLOYMENT ID
-            //         params: {
-            //             recordtype: recordType,
-            //             recordid: recordId
-            //         }
-            //     });
+                var suiteletUrl = url.resolveScript({
+                    scriptId: 'customscript_jy_load_submit_records',      // INTERNAL SCRIPT ID
+                    deploymentId: 'customdeploy_jy_load_submit_records',     // INTERNAL DEPLOYMENT ID
+                    params: {
+                        recordtype: recordType,
+                        recordid: recordId
+                    }
+                });
 
-            //     log.error("Suitelet URL", suiteletUrl);
+                log.error("Suitelet URL", suiteletUrl);
 
-            //     var response = https.get({
-            //         url: suiteletUrl
-            //     });
+                var response = https.get({
+                    url: suiteletUrl
+                });
 
-            //     log.error("Suitelet Response", response.body);
-            // }
+                log.error("Suitelet Response", response.body);
+            }
 
         } catch (e) {
             log.error('afterSubmit error', e.message);
@@ -314,6 +323,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 var trackingObj = trackingLines(customRecId); // your array of items
                 var ssccCodes = orderData.ssccCodes;
                 var itemIdsInOrder = itemIdsInOrder;
+                var locationId = orderData.locationId;
 
                 // var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIdsInOrder)
                 log.error("incoming Object - ", {
@@ -323,32 +333,12 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 });
                 //  log.error("trackingObj", trackingObj);
                 var salesOrderId = orderData.salesOrderId;
-                var bolTracking;
-                // log.error({ title: 'Sales Order ID Received', details: salesOrderId });
-                var locationId;
-                //var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIdsInOrder)
+
+
                 var bulkStageBin// = (line.locationId == 9) ? 4859 : 16692;
                 // log.error({ title: 'bulkStageBin', details: bulkStageBin });
 
-                if (salesOrderId) {
 
-                    var result = search.lookupFields({
-                        type: search.Type.SALES_ORDER,
-                        id: salesOrderId,
-                        columns: ['custbody_bol_tracking_number']
-                    });
-
-                    bolTracking = result.custbody_bol_tracking_number || '';
-
-                    log.error('BOL Tracking Number', bolTracking);
-
-                    // Vamshi: if you want to make BOL mandatory for creating the package, uncomment the below code
-                    // BOL is not mandatory for creating the package
-
-                    /*   if (!bolTracking) {
-                         return "BOL Is Not Completed"
-                       }*/
-                }
 
 
                 var itemFulfillment = record.transform({
@@ -358,6 +348,11 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     isDynamic: true
                 });
                 log.error("itemFulfillment", itemFulfillment);
+                itemFulfillment.setValue({ fieldId: 'location', value: locationId });
+
+                // Set mandatory values
+                itemFulfillment.setValue({ fieldId: 'trandate', value: new Date() });
+
 
                 var itemsFulfilled = false;
                 var itemMap = {};
@@ -381,6 +376,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     // log.error({ title: 'bulkStageBin', details: bulkStageBin });
 
                     itemMap[line.itemId].total += parseFloat(line.quantity) || 0;
+                    itemMap[line.itemId].total = line.locationId || locationId;
 
                     itemMap[line.itemId].bins.push({
                         binId: line.binId,
@@ -450,20 +446,6 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     if (itemMap[itemIdInternal]) {
                         var itemData = itemMap[itemIdInternal];
 
-                        // log.error("item data", JSON.stringify({
-                        //     itemIdInternal: itemIdInternal,
-                        //     data: itemData
-                        // }));
-
-
-                        // Set mandatory values
-                        itemFulfillment.setValue({ fieldId: 'trandate', value: new Date() });
-
-                        try {
-                            itemFulfillment.setValue({ fieldId: 'shipstatus', value: 'C' });
-                        } catch (e) {
-                            log.error("Error setting ship status", e.message);
-                        }
 
                         //  Set quantity
                         itemFulfillment.setCurrentSublistValue({
@@ -472,32 +454,30 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                             value: itemData.total
                         });
 
-                        // Set location
-                        itemFulfillment.setCurrentSublistValue({
-                            sublistId: 'item',
-                            fieldId: 'location',
-                            value: itemData.bins[0].locationId
-                        });
-                        // log.error({ title: 'itemData.bins[0].locationId', details: itemData.bins[0].locationId });
+
+                        try {
+                            // Set location
+                            itemFulfillment.setCurrentSublistValue({
+                                sublistId: 'item',
+                                fieldId: 'location',
+                                value: itemData.bins[0].locationId || itemData.locationId
+                            });
+                            // log.error({ title: 'itemData.bins[0].locationId', details: itemData.bins[0].locationId });
+                        } catch (e) {
+                            log.error("Error setting location", e.message);
+                        }
+
 
                         bulkStageBin = (itemData.bins[0].locationId == 9) ? 4859 : 16692;
                         //log.error({ title: 'bulkStageBin', details: bulkStageBin });
 
 
 
-                        // if (quantitycommitted == 0) {
-                        //     log.error("Skipping line as quantity committed is zero");
-                        //     continue;
-                        // }
 
 
 
 
-                        //  if (inventoryDetailRequired) {
-                        // Ensure correct line is selected
-                        //  itemFulfillment.selectLine({ sublistId: 'item', line: j });
 
-                        // Always force create inventory subrecord
                         var inventoryDetailSubrecord = itemFulfillment.getCurrentSublistSubrecord({
                             sublistId: 'item',
                             fieldId: 'inventorydetail',
@@ -588,71 +568,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                         itemsFulfilled = true;
                     }
                 }
-                // // step creating Amazon custom record..
-                // try {
-                //   var amazonIds = [];
-                //   //var trackingObj = trackingLines(customRecId); // your array of items
-                //   log.error("trackingObj", trackingObj);
 
-                //   if (trackingObj && trackingObj.length > 0) {
-                //     var boxCounter = 1;
-
-                //     trackingObj.forEach(function (line) {
-                //       try {
-                //         var rec = record.create({
-                //           type: 'customrecord_amzcc_custom_rec',
-                //           isDynamic: true
-                //         });
-
-                //         // --- Set field values ---
-                //         rec.setValue({
-                //           fieldId: 'custrecord_sales_order_id',
-                //           value: salesOrderId
-                //         });
-
-                //         rec.setValue({
-                //           fieldId: 'custrecord_itemid',
-                //           value: line.itemId
-                //         });
-
-                //         rec.setValue({
-                //           fieldId: 'custrecord_amzcc_code',
-                //           value: line.trackingNumber
-                //         });
-
-                //         rec.setValue({
-                //           fieldId: 'custrecord_trackingnumber',
-                //           value: line.bolTracking
-                //         });
-
-                //         rec.setValue({
-                //           fieldId: 'custrecord_ponumber',
-                //           value: line.poNumber
-                //         });
-
-                //         rec.setValue({
-                //           fieldId: 'custrecord_ucc_code',
-                //           value: line.upcCode
-                //         });
-                //         // --- Save record ---
-                //         var recId = rec.save({
-                //           enableSourcing: true,
-                //           ignoreMandatoryFields: false
-                //         });
-                //         amazonIds.push(recId);
-                //       } catch (innerErr) {
-                //         log.error('❌ Error Creating Package for Box ' + boxCounter, innerErr.message);
-                //         boxCounter++;
-                //       }
-                //     });
-                //     log.error("amazon IDs", amazonIds);
-                //   } else {
-                //     log.debug('No tracking lines found', 'customRecId: ' + customRecId);
-                //   }
-
-                // } catch (err) {
-                //   log.error("Top-level Error", err.message);
-                // }
 
                 if (!itemsFulfilled) {
                     results[salesOrderId] = {
@@ -663,80 +579,16 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     continue;
                 }
 
+                try {
+                    itemFulfillment.setValue({ fieldId: 'shipstatus', value: 'C' });
+                } catch (e) {
+                    log.error("Error setting ship status", e.message);
+                }
+
                 var fulfillmentId = itemFulfillment.save();
                 fulfillmentIds.push(fulfillmentId);
 
 
-                if (fulfillmentId) {
-                    //  tracking numbers search
-                    // try {
-                    //   //var trackingObj = trackingLines(customRecId); // your array of items
-                    //   log.error("trackingObj2", trackingObj);
-                    //   log.error("ssccCodes", ssccCodes);
-
-                    //   if (ssccCodes && ssccCodes.length > 0) {
-                    //     var boxCounter = 1;
-
-                    //     var packageIds = getInternalIdsBySsccCodes(ssccCodes);
-
-                    //     log.error("packageIds", packageIds);
-
-                    //     if (packageIds && packageIds.length > 0) {
-
-
-                    //       for (var i = 0; i < packageIds.length; i++) {
-
-                    //         var recordId = packageIds[i];
-
-                    //         try {
-                    //           log.error('Field before', {
-                    //             recordId: recordId,
-                    //             field: 'custrecord_hj_packagecontents_sublist',
-                    //             value: fulfillmentId
-                    //           });
-
-                    //           var result = record.submitFields({
-                    //             type: 'customrecordhj_tc_package_contents',
-                    //             id: recordId,
-                    //             values: {
-                    //               custrecord_hj_packagecontents_sublist: fulfillmentId
-                    //             }
-                    //           });
-
-                    //           log.error('Field Updated', {
-                    //             recordId: recordId,
-                    //             field: 'custrecord_hj_packagecontents_sublist',
-                    //             value: fulfillmentId
-                    //           });
-
-                    //           // return { success: true, id: result };
-                    //         }
-                    //         catch (e) {
-                    //           log.error('Error Updating Field', e);
-                    //           return { success: false, message: e.message };
-                    //         }
-                    //       }
-
-                    //     }
-
-
-                    //   }
-
-                    //   else {
-                    //     log.debug('No tracking lines found', 'customRecId: ' + customRecId);
-                    //   }
-
-
-
-
-                    // }
-                    // catch (err) {
-                    //   log.error("Top-level Error", err.message);
-                    // }
-                }
-                else {
-                    log.debug('fullfillment', 'customRecId: ' + customRecId);
-                }
 
 
 

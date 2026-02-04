@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NModuleScope Public
  */
-define(['N/record', 'N/log'], function (record, log) {
+define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
     /* =========================
        ENTRY POINT
@@ -258,7 +258,129 @@ define(['N/record', 'N/log'], function (record, log) {
         }
     }
 
+
+    // =========================
+    // get details of sales order return
+    // =========================
+
+    function getSalesOrderForReturn(context) {
+        try {
+            var payload = context;
+            log.debug('Get Sales Order for Return Payload', payload);
+
+            var soNum = payload.soNumber;
+            var ponum = payload.poNumber;
+            var customerName = payload.customerName;
+            var itemName = payload.itemName;
+            var shipzip = payload.shipzip;
+            if (!soNum && !ponum && !customerName && !itemName && !shipzip) {
+                return {
+                    success: false,
+                    message: 'At least one search criteria (soNumber, poNumber, customerName, itemName, shipzip) must be provided.'
+                };
+            }
+            var filters = [
+                ["type", "anyof", "SalesOrd"], "AND",
+                ["mainline", "is", "F"], "AND",
+                ["taxline", "is", "F"], "AND",
+                ["cogs", "is", "F"], "AND",
+                ["shipping", "is", "F"]
+            ];
+
+            if (soNum) {
+                filters.push("AND", ["tranid", "is", soNum]);
+            } else if (ponum) {
+                filters.push("AND", ["otherrefnum", "is", ponum]);
+            } else if (customerName) {
+                filters.push("AND", ["customer.entityid", "haskeywords", customerName]);
+            } else if (itemName) {
+                filters.push("AND", ["item.name", "is", itemName]);
+                filters.push("AND", ["shipdate", "onorbefore", "monthbeforelasttodate"]);
+            } else if (shipzip) {
+                filters.push("AND", ["shipzip", "is", shipzip]);
+                filters.push("AND", ["shipdate", "onorbefore", "monthbeforelasttodate"]);
+            }
+
+            var salesorderSearchObj = search.create({
+                type: "salesorder",
+                filters: filters,
+                columns: [
+                    search.createColumn({ name: "internalid" }),          // SO ID
+                    search.createColumn({ name: "tranid" }),              // SO Number
+                    search.createColumn({ name: "otherrefnum" }),         // PO
+                    search.createColumn({ name: "entityid", join: "customer" }),
+                    search.createColumn({ name: "internalid", join: "customer" }),
+                    search.createColumn({ name: "item" }),
+                    search.createColumn({ name: "quantity" }),
+                    search.createColumn({ name: "custcol_jyswms_picked_qty" }),
+                    search.createColumn({ name: "lineuniquekey" })
+                ]
+            });
+
+            var resultSet = salesorderSearchObj.run();
+            var firstResult = resultSet.getRange({ start: 0, end: 1 });
+
+            if (!firstResult || firstResult.length === 0) {
+                return {
+                    success: false,
+                    message: 'No Sales Order found for the given criteria.'
+                };
+            }
+
+            var salesOrderMap = {};
+
+            salesorderSearchObj.run().each(function (result) {
+
+                var soId = result.getValue({ name: "internalid" });
+
+                // Create SO container once
+                if (!salesOrderMap[soId]) {
+                    salesOrderMap[soId] = {
+                        soId: soId,
+                        soNumber: result.getValue({ name: "tranid" }),
+                        poNumber: result.getValue({ name: "otherrefnum" }),
+                        customerName: result.getValue({ name: "entityid", join: "customer" }),
+                        customerId: result.getValue({ name: "internalid", join: "customer" }),
+                        items: []
+                    };
+                }
+
+                // Push line item
+                salesOrderMap[soId].items.push({
+                    itemInternalId: result.getValue({ name: "item" }),
+                    itemName: result.getText({ name: "item" }),
+                    quantity: Number(result.getValue({ name: "quantity" })) || 0,
+                    receiveQty: Number(result.getValue({ name: "custcol_jyswms_picked_qty" })) || 0,
+                    uniqueId: result.getValue({ name: "lineuniquekey" })
+                });
+
+                return true;
+            });
+
+            // Convert map → array
+            var salesOrderArray = Object.keys(salesOrderMap).map(function (key) {
+                return salesOrderMap[key];
+            });
+
+            return {
+                success: true,
+                data: salesOrderArray   
+            };
+
+
+
+        } catch (error) {
+            log.error('Get Sales Order for Return Error', error);
+            return {
+                success: false,
+                message: 'Error occurred while fetching Sales Order details.' + error.message
+            };
+        }
+    }
+
+
     return {
-        processReturn: processReturn
+        processReturn: processReturn,
+        getSalesOrderForReturn: getSalesOrderForReturn
     };
 });

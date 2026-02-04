@@ -9,9 +9,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
     './Inventory/inventoryUtils',
     './Locations/locationUtils',
     './Tracking/trackingUtils',
-    './Returns/returnUtils'
+    './Returns/returnUtils',
+    './partsPicking/partsPickedUtil'   
 ], function (file, record, error, log, https, search, runtime, binUtils, orderUtils, itemUtils,
-    inventoryUtils, locationUtils, trackingUtils, returnUtils) {
+    inventoryUtils, locationUtils, trackingUtils, returnUtils,partsPickedUtil) {
 
     function get(context) {
         try {
@@ -39,6 +40,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                 case 'get_orders':
                     return orderUtils.getOrdersOptimized(context, pageSize, startIndex);
+                case 'get_so_for_return':
+                    return returnUtils.getSalesOrderForReturn(context);
                 case 'get_poOrdersHistory':
                     return getPurchaseOrderHistory(context);
                 case 'get_itemBasedInvoices':
@@ -720,6 +723,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'submitPallet':
                     recType = 'Submit Pallet';
                     break;
+                case 'fullFillPartsOrders':
+                    recType = 'fullFill parts orders';
+                    break;
                 case 'markAsPicked':
                     recType = "markAsPicked";
                     break;
@@ -852,6 +858,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     break;
                 case 'markAsPicked':
                     response = markAsPicked(context, id);
+                    break;
+                  case 'fullFillPartsOrders':
+                    response = partsPickedUtil.fullFillPartsOrder(context, id);
                     break;
                 case 'dropShipmentData':
                     response = dropShipmentData(context);
@@ -1390,246 +1399,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-    /*
-    //   function dropShipmentData(requestBody) {
-    
-    //     try {
-    
-    //         log.error("Incoming JSON", JSON.stringify(requestBody));
-    
-    //         // Your requestBody is a single object, not an array
-    //         var data = requestBody;
-    
-    //         var action = data.action || "";
-    //         log.error("Action", action);
-    
-    //         var user = data.user || "";
-    //         var shipMethod = data.ship_method || "";
-    //         var trailerId = data.trailer_id || "";
-    //         var arrivalDate = data.date_of_arrival || "";
-    //         var shipmentConfirmId = data.shipment_confirm_id || data.portalId || "";
-    
-    //         var rawTrackingNumbers = Array.isArray(data.tracking_numbers)
-    //             ? data.tracking_numbers
-    //             : [];
-    
-    //         var trackingObjects = [];
-    //         var trackingStrings = [];
-    
-    //         rawTrackingNumbers.forEach(function (t) {
-    //             if (!t) return;
-    
-    //             if (typeof t === 'string') {
-    //                 trackingStrings.push(t);
-    //                 trackingObjects.push({
-    //                     tracking_number: t,
-    //                     valid: true
-    //                 });
-    //             } else if (t.tracking_number) {
-    //                 trackingStrings.push(t.tracking_number);
-    //                 trackingObjects.push(t);
-    //             }
-    //         });
-    
-    //         var salesorderId = "";
-    
-    //         try {
-    
-    //             if (!trackingStrings.length) {
-    //                 return {
-    //                     status: "error",
-    //                     message: "No tracking numbers provided"
-    //                 };
-    //             }
-    
-    
-    
-    //             var filters = [];
-    //             trackingStrings.forEach(function (track) {
-    //                 if (!track) return;
-    //                 if (filters.length) filters.push("OR");
-    //                 filters.push(["custrecord_jyswms_track_number", "is", track]);
-    //             });
-    
-    //             var firstSalesOrderId = null;
-    //             var firstTrackingCount = 0;
-    
-    //             var groupedSearch = search.create({
-    //                 type: "customrecord_jyswms_sales_order_track",
-    //                 filters: filters,
-    //                 columns: [
-    //                     search.createColumn({
-    //                         name: "custrecord_jyswms_track_so_id",
-    //                         summary: search.Summary.GROUP
-    //                     }),
-    //                     search.createColumn({
-    //                         name: "internalid",
-    //                         summary: search.Summary.COUNT
-    //                     })
-    //                 ]
-    //             });
-    
-    //             groupedSearch.run().each(function (result) {
-    
-    //                 // 👇 FIRST ROW ONLY
-    //                 if (!firstSalesOrderId) {
-    
-    //                     firstSalesOrderId = result.getValue({
-    //                         name: "custrecord_jyswms_track_so_id",
-    //                         summary: search.Summary.GROUP
-    //                     });
-    
-    //                     firstTrackingCount = result.getValue({
-    //                         name: "internalid",
-    //                         summary: search.Summary.COUNT
-    //                     });
-    
-    //                     return false; // ⛔ stop search after first row
-    //                 }
-    
-    //                 return true;
-    //             });
-    
-    //             log.audit('First Sales Order', {
-    //                 salesOrderId: firstSalesOrderId,
-    //                 trackingCount: firstTrackingCount
-    //             });
-    
-    //             salesorderId = firstSalesOrderId;
-    
-    //         } catch (e) {
-    //             log.error('Error Fetching First Sales Order', e);
-    
-    //         }
-    
-    //         var salesFullFillRecord = "";
-    
-    //         var headerSearch = search.create({
-    //             type: 'customrecord_order_fulfillment_details',
-    //             filters: [
-    //                 ['custrecord_jyswms_sales_order_id', 'anyof', salesorderId]
-    //             ],
-    //             columns: ['internalid']
-    //         });
-    //         headerSearch.run().each(function (result) {
-    //             salesFullFillRecord = result.id;
-    //             return false;
-    //         });
-    
-    
-    
-    //         if (salesFullFillRecord) {
-    //             record.submitFields({
-    //                 type: 'customrecord_order_fulfillment_details',
-    //                 id: salesFullFillRecord,
-    //                 values: {
-    //                     custrecord_jyswms_carrier_pro_number: trailerId
-    //                 }
-    //             });
-    //         }
-    
-    //         log.error("Processing Shipment", {
-    //             user: user,
-    //             shipMethod: shipMethod,
-    //             trailerId: trailerId,
-    //             arrivalDate: arrivalDate
-    //         });
-    
-    //         var headerRec = record.create({
-    //             type: "customrecord_jyswms_dropship_orders",
-    //             isDynamic: true
-    //         });
-    
-    //         headerRec.setValue("custrecord_jyswms_user", user);
-    //         headerRec.setValue("custrecord_jyswms_ship_method", shipMethod);
-    //         headerRec.setValue("custrecord_jyswms_trailer_id", trailerId);
-    
-    //         // Parse arrival date string into a Date object for NetSuite
-    //         if (arrivalDate) {
-    //             var arrivalDateObj = null;
-    //             try {
-    //                 // Expecting M/D/YYYY like "11/27/2025"
-    //                 arrivalDateObj = new Date(arrivalDate);
-    //             } catch (dateErr) {
-    //                 log.error("Invalid arrivalDate format", {
-    //                     rawValue: arrivalDate,
-    //                     error: dateErr && dateErr.message
-    //                 });
-    //             }
-    
-    //             if (arrivalDateObj && !isNaN(arrivalDateObj.getTime())) {
-    //                 headerRec.setValue("custrecord_jyswms_date_of_arrival", arrivalDateObj);
-    //             } else {
-    //                 log.error("Skipping date_of_arrival, could not parse to valid Date", arrivalDate);
-    //             }
-    //         }
-    //         headerRec.setValue("custrecord_jyswms_shipment_confirm_id", shipmentConfirmId);
-    
-    //         // Save complete incoming JSON
-    //         headerRec.setValue("custrecord_jyswms_json", JSON.stringify(data));
-    
-    
-    //         for (var i = 0; i < trackingObjects.length; i++) {
-    
-    //             var tr = trackingObjects[i];
-    //             log.error("Tracking Row", tr);
-    
-    //             headerRec.selectNewLine({
-    //                 sublistId: "recmachcustrecord_jyswms_header_id"
-    //             });
-    
-    //             headerRec.setCurrentSublistValue({
-    //                 sublistId: "recmachcustrecord_jyswms_header_id",
-    //                 fieldId: "custrecord_jyswms_tracking_number",
-    //                 value: tr.tracking_number
-    //             });
-    
-    //             headerRec.setCurrentSublistValue({
-    //                 sublistId: "recmachcustrecord_jyswms_header_id",
-    //                 fieldId: "custrecord_jyswms_track_status",
-    //                 value: tr.valid
-    //             });
-    
-    //             headerRec.commitLine({
-    //                 sublistId: "recmachcustrecord_jyswms_header_id"
-    //             });
-    //         }
-    
-    //         log.error("Before DropShip Header Save", {
-    //             user: user,
-    //             shipMethod: shipMethod,
-    //             trailerId: trailerId,
-    //             arrivalDate: arrivalDate,
-    //             shipmentConfirmId: shipmentConfirmId,
-    //             trackingCount: trackingObjects.length
-    //         });
-    
-    //         var savedId = headerRec.save();
-    //         log.error("Saved DropShip Header", savedId);
-    
-    //         return {
-    //             status: "success",
-    //             message: "Drop Ship Record Saved Successfully",
-    //             internalId: savedId
-    //         };
-    
-    //     } catch (e) {
-    
-    //         log.error("dropShipmentData ERROR", {
-    //             name: e.name,
-    //             message: e.message,
-    //             stack: e.stack,
-    //             toString: e.toString && e.toString()
-    //         });
-    
-    //         return {
-    //             status: "error",
-    //             message: e.message || "Unexpected error in dropShipmentData"
-    //         };
-    //     }
-    // }
-    
-    */
+  
+
+  
     function generateToken() {
         try {
             var webhookUrl = 'https://api.jyswms.com/user/login'; // prod Url
@@ -1711,48 +1483,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-    /* function lookForExistingRecords(context) {
-    //     try {
-    //         var portalId = context.portalId;
-
-
-    //         var mySearch = search.create({
-    //             type: 'customrecord_wms_ai_api_custom_rec',
-    //             filters: [
-    //                 ['custrecordwms_ai_api_custrec_portalid', 'is', portalId]
-    //             ],
-    //             columns: [
-    //                 search.createColumn({
-    //                     name: "internalid"
-    //                 }),
-    //                 search.createColumn({
-    //                     name: "custrecord_wms_ai_api_custrec_response"
-    //                 })
-    //             ]
-    //         });
-
-    //         var searchResult = mySearch.run().getRange({
-    //             start: 0,
-    //             end: 1
-    //         });
-
-    //         if (!searchResult || searchResult.length === 0) {
-    //             return false; // no match found
-    //         }
-
-    //         //  get first result object
-    //         var firstResult = searchResult[0];
-    //         var responseValue = firstResult.getValue({
-    //             name: "custrecord_wms_ai_api_custrec_response"
-    //         });
-
-    //         return responseValue || 'Record already exists';
-    //     } catch (e) {
-    //         log.error("Error in lookForExistingRecords", e.message);
-    //         return false;
-    //     }
-    / }*/
-
     function lookForExistingRecords(context) {
         try {
             if (!context || !context.portalId) {
@@ -1762,11 +1492,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             var portalId = context.portalId;
 
             // Check if portalId is in range DSP-467 to DSP-1000
-            if (portalId.indexOf('PIC-') === 0) {
+            if (portalId.indexOf('DSP-') === 0) {
                 var numPart = portalId.substring(4); // after 'DSP-'
                 var portalNumber = parseInt(numPart, 10);
 
-                if (!isNaN(portalNumber) && portalNumber >= 8402 && portalNumber <= 8795) {
+                if (!isNaN(portalNumber) && portalNumber >= 8440 && portalNumber <= 8442) {
                     log.debug('PortalId skipped by range rule', portalId);
                     return false;
                 }
@@ -1803,8 +1533,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             return false;
         }
     }
-
-
 
     function markAsPicked(requestBody, jyswmsApiCustRecId) {
         var headerId = null;
@@ -2047,6 +1775,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         });
                         headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
                         headerRec.setValue('custrecord_jyswms_portal_id', portalId);
+                        headerRec.setValue('custrecord_jyswms_location_id', locationId);
                         // Save new record first to get the ID before adding lines
                         headerId = headerRec.save();
                         existingMap[salesOrderId] = headerId;
@@ -2129,6 +1858,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
                             headerRec.setValue('custrecord_jyswms_approved', true);
                         }
+                       headerRec.setValue('custrecord_jyswms_location_id', locationId);
 
                     } catch (error) {
                         log.error("error message", error.message);
@@ -2471,8 +2201,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             return { status: 'error', message: e.message };
         }
     }
-
-
 
     function getBinNameToIdMap() {
         try {
