@@ -122,7 +122,6 @@ define([
             return;
         }
 
-
         try {
             const response = https.get({
                 url: 'https://api.jyswms.com/dropship-sales-order-status?sales_order_id=' + recId,              

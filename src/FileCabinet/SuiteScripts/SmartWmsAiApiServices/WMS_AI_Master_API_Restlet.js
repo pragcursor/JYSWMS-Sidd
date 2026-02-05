@@ -10,9 +10,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
     './Locations/locationUtils',
     './Tracking/trackingUtils',
     './Returns/returnUtils',
-    './partsPicking/partsPickedUtil'   
+    './partsPicking/partsPickedUtil'
 ], function (file, record, error, log, https, search, runtime, binUtils, orderUtils, itemUtils,
-    inventoryUtils, locationUtils, trackingUtils, returnUtils,partsPickedUtil) {
+    inventoryUtils, locationUtils, trackingUtils, returnUtils, partsPickedUtil) {
 
     function get(context) {
         try {
@@ -859,7 +859,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'markAsPicked':
                     response = markAsPicked(context, id);
                     break;
-                  case 'fullFillPartsOrders':
+                case 'fullFillPartsOrders':
                     response = partsPickedUtil.fullFillPartsOrder(context, id);
                     break;
                 case 'dropShipmentData':
@@ -1399,9 +1399,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-  
 
-  
+
+
     function generateToken() {
         try {
             var webhookUrl = 'https://api.jyswms.com/user/login'; // prod Url
@@ -1858,7 +1858,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
                             headerRec.setValue('custrecord_jyswms_approved', true);
                         }
-                       headerRec.setValue('custrecord_jyswms_location_id', locationId);
+                        headerRec.setValue('custrecord_jyswms_location_id', locationId);
 
                     } catch (error) {
                         log.error("error message", error.message);
@@ -1892,7 +1892,43 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             // Continue processing without adjustment
                         } else {
                             // Create inventory adjustment if there's a shortfall
-                            var negativeQty = -qtyDiff;
+                           // var negativeQty = -qtyDiff;
+
+                            // new logic for fetching item quantity per bin details
+
+                            var negativeQty = '';
+                            const inventorybalanceSearchObj = search.create({
+                                type: "inventorybalance",
+                                filters:
+                                    [
+                                        ["item", "anyof", itemId],
+                                        "AND",
+                                        ["location", "anyof", locationId],
+                                        "AND",
+                                        ["available", "greaterthan", "0"],
+                                        "AND",
+                                        ["binnumber.custrecord_jyswms_exclude_from_inventory", "is", "F"],
+                                        "AND",
+                                        ["binnumber", "anyof", binId],
+                                        "AND",
+                                        ["binnumber.inactive", "is", "F"]
+                                    ],
+                                columns:
+                                    [
+                                        search.createColumn({
+                                            name: "onhand",
+                                            summary: "SUM",
+                                            label: "On Hand"
+                                        })
+                                    ]
+                            });
+                            inventorybalanceSearchObj.run().each(function (result) {
+                                var onHandQty = result.getValue({ name: "onhand", summary: "SUM" });
+                                negativeQty = -onHandQty;
+                                return true;
+                            });
+
+
                             log.debug(" Negative inventory adjustment - NegativeQuanity : ", negativeQty);
 
                             var inventoryAdjRec = record.create({
