@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
+define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, url, https, log, search) {
 
     function afterSubmit(context) {
         try {
@@ -11,6 +11,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
             var recordId = newRec.id;
             var recordType = newRec.type;
+            var response = {};
 
             var isApproved = newRec.getValue({ fieldId: 'custrecord_jyswms_approved' });
             var itemFulfill = newRec.getValue({ fieldId: 'custrecord_jyswms_rel_item_ful' });
@@ -18,8 +19,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var headerPickedQty = newRec.getValue({ fieldId: 'custrecord_jyswms_total_pick_qty' });
             var totalSoQuantity = newRec.getValue({ fieldId: 'custrecord_jyswms_total_so_qty' });
             var fulfillPartilly = newRec.getValue({ fieldId: 'custrecord_jyswms_is_partially_fulfilled' });
-            var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' });
-            var lineLineLocation = "";
+            var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' }) || "";
+            var lineLineLocation = locationId;
 
             if (fulfillPartilly && !isApproved) {
 
@@ -55,14 +56,14 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 //  if (isApproved && itemFulfill && salesOrderId) {
 
 
-                // var locationLookup = search.lookupFields({
-                //     type: search.Type.SALES_ORDER,
-                //     id: salesOrderId,
-                //     columns: ['location']
-                // });
-
-                // var locationId = locationLookup.location.length ? locationLookup.location[0].value : null;
-
+                var locationLookup = search.lookupFields({
+                    type: search.Type.SALES_ORDER,
+                    id: salesOrderId,
+                    columns: ['location']
+                });
+                if (!locationId) {
+                    locationId = locationLookup.location.length ? locationLookup.location[0].value : null;
+                }
                 // var weightLookup = search.lookupFields({
                 //         type: search.Type.ITEM,
                 //         id: salesOrderId,
@@ -105,7 +106,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                         sublistId: 'recmachcustrecord_sales_order_header',
                         fieldId: 'custrecord_jyswms_item_so_line_loc',
                         line: i
-                    })) || 0;
+                    })) || ""; //locationId
 
                     var binName = newRec.getSublistValue({
                         sublistId: 'recmachcustrecord_sales_order_header',
@@ -149,7 +150,63 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                         };
                     }
                 }
+                log.error('itemIdsInOrder', itemIdsInOrder);
+                var itemName = '';
+                if (itemIdsInOrder.length === 1) {
+                    var itemTypeLookup = search.lookupFields({
+                        type: search.Type.ITEM,
+                        id: Number(itemIdsInOrder[0]),
+                        columns: ['recordtype', "itemid"]
+                    });
+                    itemName = itemTypeLookup.itemid || '';
+                    if (itemTypeLookup.recordtype === 'noninventoryitem' && itemName.toLowerCase().includes('parts')) {
+                        // transform the sales order to item fulfillment directly for non inventory item PARTS
+                        var itemFulfillment = record.transform({
+                            fromType: record.Type.SALES_ORDER,
+                            fromId: salesOrderId,
+                            toType: record.Type.ITEM_FULFILLMENT,
+                            isDynamic: true
+                        });
+                        itemFulfillment.setValue({ fieldId: 'location', value: locationId });
+                        var fulfillmentLineCount = itemFulfillment.getLineCount({ sublistId: 'item' });
 
+                        for (var j = 0; j < fulfillmentLineCount; j++) {
+                            itemFulfillment.selectLine({ sublistId: 'item', line: j });
+
+                            var soItemId = itemFulfillment.getCurrentSublistValue({
+                                sublistId: 'item',
+                                fieldId: 'item'
+                            });
+
+                            // Only fulfill the item you processed earlier
+                            if (Number(soItemId) === Number(itemIdsInOrder[0])) {
+
+                                itemFulfillment.setCurrentSublistValue({
+                                    sublistId: 'item',
+                                    fieldId: 'itemreceive',
+                                    value: true
+                                });
+
+                                itemFulfillment.setCurrentSublistValue({
+                                    sublistId: 'item',
+                                    fieldId: 'quantity',
+                                    value: totalQuantity // or linePickedQty
+                                });
+                            }
+
+                            itemFulfillment.commitLine({ sublistId: 'item' });
+                        }
+                        itemFulfillment.setValue({ fieldId: 'shipstatus', value: 'C' });
+                        var fulfillmentId = itemFulfillment.save();
+                        log.error('Item Fulfillment Created for Non Inventory Item', fulfillmentId);
+                    } else {
+                        log.error('Item is not Non Inventory Item', itemTypeLookup.recordtype);
+                    }
+                }
+                if ((itemIdsInOrder.length === 1) && itemName.toLowerCase().includes('parts')) {
+                    log.error('Item is Parts - skipping fulfillment creation', itemName);
+                    return;
+                }
                 lines = Object.values(linesMap);
 
                 // ✅ Validate totals
@@ -181,6 +238,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 }
 
                 log.error("FINAL MERGED LINES", JSON.stringify(lines));
+
+
 
                 // Step 2: Build a map of itemId => array of tracking numbers
                 var trackingLineCount = newRec.getLineCount({ sublistId: 'recmachcustrecord_jyswms_so_header' });
@@ -252,30 +311,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
                 if (obj) {
                     // log.error("Entering object");
-                    var response = FullFillOrders(obj, context.newRecord.id, itemIdsInOrder);
+                    response = FullFillOrders(obj, context.newRecord.id, itemIdsInOrder);
                     log.error('response', JSON.stringify(response));
-
-
-                    try {
-                        // Load the record
-                        var fulfillmentRec = record.load({
-                            type: newRec.type,
-                            id: newRec.id,
-                            isDynamic: true
-                        });
-
-
-                        // Save (submit) the record
-                        var savedId = fulfillmentRec.save({
-                            enableSourcing: true,
-                            ignoreMandatoryFields: true
-                        });
-
-                        log.error('Record Saved Successfully', savedId);
-                    } catch (error) {
-                        log.error("error", error.message)
-                    }
-
 
 
                 }
@@ -283,25 +320,27 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
             }
 
-             if (itemFulfill) {
 
-                var suiteletUrl = url.resolveScript({
-                    scriptId: 'customscript_jy_load_submit_records',      // INTERNAL SCRIPT ID
-                    deploymentId: 'customdeploy_jy_load_submit_records',     // INTERNAL DEPLOYMENT ID
-                    params: {
-                        recordtype: recordType,
-                        recordid: recordId
-                    }
-                });
 
-                log.error("Suitelet URL", suiteletUrl);
+            // log.error("response[salesOrderId].fulfillmentId",response);
 
-                var response = https.get({
-                    url: suiteletUrl
-                });
+            //  var suiteletUrl = url.resolveScript({
+            //      scriptId: 'customscript_jy_load_submit_records',      // INTERNAL SCRIPT ID
+            //      deploymentId: 'customdeploy_jy_load_submit_records',     // INTERNAL DEPLOYMENT ID
+            //      params: {
+            //          recordtype: recordType,
+            //          recordid: recordId
+            //      }
+            //  });
 
-                log.error("Suitelet Response", response.body);
-            }
+            //  log.error("Suitelet URL", suiteletUrl);
+
+            //  var slresponse = https.get({
+            //      url: suiteletUrl
+            //  });
+
+            //  log.error("Suitelet Response", slresponse.body);
+
 
         } catch (e) {
             log.error('afterSubmit error', e.message);
@@ -329,7 +368,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 log.error("incoming Object - ", {
                     ssccCodes: ssccCodes,
                     trackingObj: trackingObj,
-                    orderData: orderData
+                    orderData: orderData,
+                    locationId: locationId
                 });
                 //  log.error("trackingObj", trackingObj);
                 var salesOrderId = orderData.salesOrderId;
@@ -347,8 +387,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     toType: record.Type.ITEM_FULFILLMENT,
                     isDynamic: true
                 });
-                log.error("itemFulfillment", itemFulfillment);
-                itemFulfillment.setValue({ fieldId: 'location', value: locationId });
+                // itemFulfillment.setValue({ fieldId: 'location', value: locationId });
 
                 // Set mandatory values
                 itemFulfillment.setValue({ fieldId: 'trandate', value: new Date() });
@@ -363,7 +402,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     var line = orderData.lines[i];
                     if (!line.selected) continue;
 
-                    locationId = line.locationId;
+                    //  locationId = line.locationId;
 
                     if (!itemMap[line.itemId]) {
                         itemMap[line.itemId] = {
@@ -373,20 +412,44 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     }
 
                     // bulkStageBin = (line.locationId == 9) ? 4859 : 16692;
-                    // log.error({ title: 'bulkStageBin', details: bulkStageBin });
+                    if (line.locationId) {
+                        log.error("(line.locationId", line.locationId);
+                        itemFulfillment.setValue({ fieldId: 'location', value: line.locationId });
+
+                    }
 
                     itemMap[line.itemId].total += parseFloat(line.quantity) || 0;
-                    itemMap[line.itemId].total = line.locationId || locationId;
+                    itemMap[line.itemId].locationId = line.locationId || locationId;
 
                     itemMap[line.itemId].bins.push({
                         binId: line.binId,
                         qty: parseFloat(line.quantity) || 0,
-                        locationId: line.locationId
+                        locationId: line.locationId || locationId
                     });
 
                 }
-                //log.error("itemMap", {itemMap:itemMap,});
-                var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIdsInOrder);
+
+
+                if (!locationId || locationId == "" || locationId == " " || locationId == "0") {
+
+                    log.error("no locaton - id", locationId);
+                    var locationLookup = search.lookupFields({
+                        type: search.Type.SALES_ORDER,
+                        id: salesOrderId,
+                        columns: ['location']
+                    });
+
+                    locationId = locationLookup.location.length ? locationLookup.location[0].value : null;
+                }
+                try {
+                    log.error("itemMap", locationId);
+                    var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIdsInOrder);
+
+                } catch (error) {
+                    log.error("itemAvailQty - error", error.message);
+                }
+                // //log.error("itemMap", {itemMap:itemMap,});
+                // var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIdsInOrder);
 
                 log.error("object -- ", { itemMap: itemMap, itemAvailQty: itemAvailQty });
                 var adjustmentObj = {};
@@ -456,12 +519,16 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
 
                         try {
+
+                            if (itemData.locationId || itemData.bins[0].locationId) {
+                                itemFulfillment.setCurrentSublistValue({
+                                    sublistId: 'item',
+                                    fieldId: 'location',
+                                    value: itemData.bins[0].locationId || itemData.locationId
+                                });
+                            }
                             // Set location
-                            itemFulfillment.setCurrentSublistValue({
-                                sublistId: 'item',
-                                fieldId: 'location',
-                                value: itemData.bins[0].locationId || itemData.locationId
-                            });
+
                             // log.error({ title: 'itemData.bins[0].locationId', details: itemData.bins[0].locationId });
                         } catch (e) {
                             log.error("Error setting location", e.message);
@@ -592,8 +659,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
 
 
-                log.error({ title: 'Item Fulfillment Created', details: `Fulfillment ID: ${fulfillmentId}` });
-                log.error("FULFILLMENT CREATED SUCCESFULLY");
+                log.debug({ title: 'Item Fulfillment Created', details: `Fulfillment ID: ${fulfillmentId}` });
+
 
                 results[salesOrderId] = {
                     salesOrderId: salesOrderId,
@@ -610,6 +677,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                         custrecord_jyswms_error: ''
                     }
                 });
+
 
             } catch (e) {
                 record.submitFields({
@@ -630,6 +698,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 log.error("Unexpected error in FullFillOrders", e.message);
             }
         }
+        return results;
     }
 
     function createAdjustment(adjustmentObj, locationId) {

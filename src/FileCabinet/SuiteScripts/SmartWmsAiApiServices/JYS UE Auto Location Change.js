@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/record', 'N/search'], (record, search) => {
+define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtils.js','./JYSWMS_generateToken_API.js'], (record, search, log,runtime,https, autoLocUtil, tokenModule) => { 
 
     const LOC_HARDEE = '15';     // L60-Hardeeville_SC
     const LOC_FLEMINGTON = '9';  // Flemington L41
@@ -91,6 +91,8 @@ define(['N/record', 'N/search'], (record, search) => {
             log.debug('Inventory Map', JSON.stringify(inventoryMap));
             let anyLineUpdated = false;
             let newHeaderLocation = null;
+            const updatedItemIds = new Set();
+
             for (let i = 0; i < lineCount; i++) {
 
                 const itemType = so.getSublistValue({
@@ -135,7 +137,7 @@ define(['N/record', 'N/search'], (record, search) => {
                     currentLoc === LOC_HARDEE ? LOC_FLEMINGTON : LOC_HARDEE;
 
                 log.debug('alternateLoc', alternateLoc);
-                log.debug(itemId,'qtyRequired='+qtyRequired+',currentLoc'+ inventoryMap[itemId][currentLoc]+', Alternate='+ inventoryMap[itemId][alternateLoc] )
+                log.debug(itemId, 'qtyRequired=' + qtyRequired + ',currentLoc' + inventoryMap[itemId][currentLoc] + ', Alternate=' + inventoryMap[itemId][alternateLoc])
 
                 if (
                     inventoryMap[itemId][alternateLoc] &&
@@ -155,7 +157,8 @@ define(['N/record', 'N/search'], (record, search) => {
                         value: alternateLoc
                     });
                     anyLineUpdated = true;
-
+                    // collect ONLY item IDs
+                    updatedItemIds.add(itemId);
                     // Track header location ONLY if single-line SO
                     if (lineCount === 1) {
                         newHeaderLocation = alternateLoc;
@@ -163,7 +166,7 @@ define(['N/record', 'N/search'], (record, search) => {
                 }
 
             }
-
+           // log.debug('updatedItemIds', updatedItemIds);
             // Save only if changes were made
             if (anyLineUpdated) {
                 if (lineCount === 1 && newHeaderLocation) {
@@ -171,7 +174,7 @@ define(['N/record', 'N/search'], (record, search) => {
                         fieldId: 'location',
                         value: newHeaderLocation
                     });
-                  
+
                 }
                 so.setValue({
                     fieldId: 'custbody_jyswms_loc_updated',
@@ -195,10 +198,57 @@ define(['N/record', 'N/search'], (record, search) => {
                     }
                 });
             }
+
+            let responseJson = null;
+            
+            if (updatedItemIds.size) {
+                const payload = {
+                    salesOrderHeaderId: soId,
+                    salesOrderItemId: Array.from(updatedItemIds) // ['123','456']
+                };
+
+               responseJson = autoLocUtil.getOrdersDUP(payload);
+               log.audit('Util Response', JSON.stringify(responseJson));
+            }
+            if(responseJson && responseJson.length > 0){
+                var send =  sendData(responseJson)
+            }
+
         } catch (error) {
             log.error('Error in SO Auto Location Change', error);
         }
     };
+
+
+
+    /** Sends data to external API using parameters */
+    function sendData(recId) {
+        const token = tokenModule.generateToken();
+        if (!token) {
+            return;
+        }
+
+        try {
+            const response = https.post({
+                url: 'https://api.jyswms.com/update-dropship-lines?closed=' + false,              
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(recId)
+            });
+
+            log.debug('sendData Response', JSON.stringify(response));
+            return {
+                success: response.code === 200,
+                response: response.body || ''
+            };
+
+        } catch (e) {
+            log.error('sendData Error', e.message);
+            return { success: false, error: e.message };
+        }
+    }
 
     return { afterSubmit };
 });

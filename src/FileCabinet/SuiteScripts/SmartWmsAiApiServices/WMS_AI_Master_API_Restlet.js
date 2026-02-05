@@ -50,6 +50,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     return orderUtils.getNonAmazonDropShipOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
                     return orderUtils.getDropShipOrders(context, pageSize, startIndex);
+                 case 'getDropShipOrdersPerOrder':
+                    return orderUtils.getDropShipOrdersPerOrder(context, pageSize, startIndex);
                 case 'getOrdersDUP':
                     return orderUtils.getOrdersDUP(context, pageSize, startIndex);
                 case 'get_UnpickedOrders':
@@ -1492,15 +1494,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             var portalId = context.portalId;
 
             // Check if portalId is in range DSP-467 to DSP-1000
-            if (portalId.indexOf('DSP-') === 0) {
-                var numPart = portalId.substring(4); // after 'DSP-'
-                var portalNumber = parseInt(numPart, 10);
+            // if (portalId.indexOf('DSP-') === 0) {
+            //     var numPart = portalId.substring(4); // after 'DSP-'
+            //     var portalNumber = parseInt(numPart, 10);
 
-                if (!isNaN(portalNumber) && portalNumber >= 8440 && portalNumber <= 8442) {
-                    log.debug('PortalId skipped by range rule', portalId);
-                    return false;
-                }
-            }
+            //     if (!isNaN(portalNumber) && portalNumber >= 8440 && portalNumber <= 8442) {
+            //         log.debug('PortalId skipped by range rule', portalId);
+            //         return false;
+            //     }
+            // }
 
             var mySearch = search.create({
                 type: 'customrecord_wms_ai_api_custom_rec',
