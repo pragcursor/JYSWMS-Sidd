@@ -49,7 +49,7 @@ define([
             }
 
             var responseObj = JSON.parse(apiResult.response || '{}');
-           log.debug('API Response', JSON.stringify(responseObj));
+           log.debug('API Response for SO ID ' + recId, JSON.stringify(responseObj));
             var sourceArray = [];
             if (responseObj.completed && responseObj.completed.length > 0) {
                 sourceArray = responseObj.completed;
@@ -121,6 +121,7 @@ define([
         if (!token) {
             return;
         }
+
 
         try {
             const response = https.get({

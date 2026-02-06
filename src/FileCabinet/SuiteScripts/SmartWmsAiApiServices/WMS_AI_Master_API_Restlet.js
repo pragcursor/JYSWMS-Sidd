@@ -50,7 +50,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     return orderUtils.getNonAmazonDropShipOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
                     return orderUtils.getDropShipOrders(context, pageSize, startIndex);
-                 case 'getDropShipOrdersPerOrder':
+                case 'getDropShipOrdersPerOrder':
                     return orderUtils.getDropShipOrdersPerOrder(context, pageSize, startIndex);
                 case 'getOrdersDUP':
                     return orderUtils.getOrdersDUP(context, pageSize, startIndex);
@@ -740,6 +740,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'post_returnOrders':
                     recType = 'Return Order';
                     break;
+                case 'sopicked_endoftheday':
+                    recType = 'Sales Order'
+                    break;
                 default:
                     return {
                         status: 400,
@@ -854,6 +857,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     break;
                 case 'submitPallet':
                     response = orderUtils.processPalletUpdate(context);
+                    break;
+                case 'sopicked_endoftheday':
+                    response = orderUtils.sopicked_endoftheday(context);
                     break;
                 case 'binTransfer':
                     response = binUtils.binTransfer(context, id);
@@ -1894,7 +1900,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             // Continue processing without adjustment
                         } else {
                             // Create inventory adjustment if there's a shortfall
-                           // var negativeQty = -qtyDiff;
+                            // var negativeQty = -qtyDiff;
 
                             // new logic for fetching item quantity per bin details
 

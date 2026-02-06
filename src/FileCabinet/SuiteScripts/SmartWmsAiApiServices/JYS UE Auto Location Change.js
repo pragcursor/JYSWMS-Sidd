@@ -47,8 +47,15 @@ define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtil
                     fieldId: 'itemtype',
                     line: i
                 });
+                const pickedQtyRaw = so.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'custcol_jyswms_picked_qty',
+                    line: i
+                });
+                const pickedQty = Number(pickedQtyRaw) || 0;
 
-                if (itemType === 'InvtPart') {
+                log.debug('ispicked - for order :' + soId + ' ', pickedQty);
+                if (itemType === 'InvtPart' && pickedQty <= 0) {
                     const itemId = so.getSublistValue({
                         sublistId: 'item',
                         fieldId: 'item',
@@ -58,8 +65,8 @@ define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtil
                 }
             }
 
-            log.debug('itemSet', JSON.stringify(itemSet));
-            log.debug('lineCount', lineCount);
+          //  log.debug('itemSet', JSON.stringify(itemSet));
+          //  log.debug('lineCount', lineCount);
             if (!itemSet.size) return;
 
             // Inventory availability map: { itemId: { locationId: availableQty } }
@@ -88,7 +95,7 @@ define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtil
                 inventoryMap[itemId][locId] = qty;
                 return true;
             });
-            log.debug('Inventory Map', JSON.stringify(inventoryMap));
+            //log.debug('Inventory Map', JSON.stringify(inventoryMap));
             let anyLineUpdated = false;
             let newHeaderLocation = null;
             const updatedItemIds = new Set();
@@ -100,7 +107,7 @@ define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtil
                     fieldId: 'itemtype',
                     line: i
                 });
-                log.debug('itemType', itemType);
+              //  log.debug('itemType', itemType);
                 if (itemType !== 'InvtPart') continue;
 
                 const itemId = so.getSublistValue({
@@ -108,7 +115,7 @@ define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtil
                     fieldId: 'item',
                     line: i
                 });
-                log.debug('inventoryMap[itemId]', inventoryMap[itemId]);
+              //  log.debug('inventoryMap[itemId]', inventoryMap[itemId]);
                 if (!inventoryMap[itemId]) continue;
 
                 const qtyRequired = parseFloat(
@@ -136,14 +143,14 @@ define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtil
                 const alternateLoc =
                     currentLoc === LOC_HARDEE ? LOC_FLEMINGTON : LOC_HARDEE;
 
-                log.debug('alternateLoc', alternateLoc);
-                log.debug(itemId, 'qtyRequired=' + qtyRequired + ',currentLoc' + inventoryMap[itemId][currentLoc] + ', Alternate=' + inventoryMap[itemId][alternateLoc])
+              //  log.debug('alternateLoc', alternateLoc);
+              //  log.debug(itemId, 'qtyRequired=' + qtyRequired + ',currentLoc' + inventoryMap[itemId][currentLoc] + ', Alternate=' + inventoryMap[itemId][alternateLoc])
 
                 if (
                     inventoryMap[itemId][alternateLoc] &&
                     inventoryMap[itemId][alternateLoc] >= qtyRequired
                 ) {
-                    log.debug('inventoryMap[itemId][alternateLoc] >= qtyRequired', inventoryMap[itemId][alternateLoc] >= qtyRequired);
+                   // log.debug('inventoryMap[itemId][alternateLoc] >= qtyRequired', inventoryMap[itemId][alternateLoc] >= qtyRequired);
                     so.setSublistValue({
                         sublistId: 'item',
                         fieldId: 'location',
@@ -208,7 +215,7 @@ define(['N/record', 'N/search','N/log','N/runtime','N/https','./Orders/orderUtil
                 };
 
                responseJson = autoLocUtil.getOrdersDUP(payload);
-               log.audit('Util Response', JSON.stringify(responseJson));
+             //  log.audit('Util Response', JSON.stringify(responseJson));
             }
             if(responseJson && responseJson.length > 0){
                 var send =  sendData(responseJson)
