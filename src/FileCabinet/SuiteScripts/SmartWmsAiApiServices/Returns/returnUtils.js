@@ -84,8 +84,6 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 isDynamic: true
             });
 
-            rmaRec.setValue({ fieldId: 'orderstatus', value: 'B' });
-
             var Imageblocks = [];
             var lineCount = rmaRec.getLineCount({ sublistId: 'item' });
 
