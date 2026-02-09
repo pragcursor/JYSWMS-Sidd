@@ -613,9 +613,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 };
             }
             var isExistsResp = ""
-            // if (action == "post_returnOrders") {
-            //     return returnUtils.processReturn(context);
-            // }
+           
             if (action == "submitPallet") {
                 try {
 

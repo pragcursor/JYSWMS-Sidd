@@ -31,7 +31,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 if (damageItems.length) {
                     var damageRmaId = createRMA(soId, damageItems, 'DAMAGE');
                     var damageIrId = createItemReceipt(damageRmaId, damageItems, 'DAMAGE');
-
+                    var updateso = updatesolines(soId, damageItems)
                     results.push({
                         salesOrderId: Number(soId),
                         returnAuthorizationId: damageRmaId,
@@ -44,7 +44,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 if (resaleItems.length) {
                     var resaleRmaId = createRMA(soId, resaleItems, 'RE-SALE');
                     var resaleIrId = createItemReceipt(resaleRmaId, resaleItems, 'RE-SALE');
-
+                    var updateso = updatesolines(soId, damageItems)
                     results.push({
                         salesOrderId: Number(soId),
                         returnAuthorizationId: resaleRmaId,
@@ -65,7 +65,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 });
             }
         });
-
+        log.error('results', results)
         return {
             success: !hasFailure,
             data: results
@@ -76,6 +76,10 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
        RMA CREATION
        ========================= */
     function createRMA(soId, payloadItems, returnType) {
+        // log.error('payloadItems - RMA', payloadItems)
+        // log.error('soId', soId)
+        // log.error('returnType', returnType)
+
         try {
             var rmaRec = record.transform({
                 fromType: record.Type.SALES_ORDER,
@@ -83,6 +87,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 toType: record.Type.RETURN_AUTHORIZATION,
                 isDynamic: true
             });
+            rmaRec.setValue({ fieldId: 'orderstatus', value: 'B' });
 
             var Imageblocks = [];
             var lineCount = rmaRec.getLineCount({ sublistId: 'item' });
@@ -94,9 +99,14 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     sublistId: 'item',
                     fieldId: 'item'
                 });
+                var lineuniqId = rmaRec.getCurrentSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'lineuniquekey'
+                });
 
                 var payloadItem = payloadItems.find(function (p) {
-                    return Number(p.itemInternalId) === Number(itemId);
+                 //   return Number(p.itemInternalId) === Number(itemId);
+                    return Number(p.uniqueId) == Number(lineuniqId);
                 });
 
                 if (!payloadItem) {
@@ -148,7 +158,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
         } catch (e) {
             log.error('RMA Creation Error', e);
-            throw new Error('RMA_CREATION_FAILED: ' + e.message);
+           // throw new Error('RMA_CREATION_FAILED: ' + e.message);
         }
     }
 
@@ -156,6 +166,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
        ITEM RECEIPT CREATION
        ========================= */
     function createItemReceipt(rmaId, payloadItems, returnType) {
+
         try {
             var irRec = record.transform({
                 fromType: record.Type.RETURN_AUTHORIZATION,
@@ -174,9 +185,18 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     sublistId: 'item',
                     fieldId: 'item'
                 });
+                var lineuniqId = irRec.getCurrentSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'lineuniquekey'
+                });
 
                 var payloadItem = payloadItems.find(function (p) {
-                    return Number(p.itemInternalId) === Number(itemId);
+                     return Number(p.itemInternalId) === Number(itemId);
+                    // if (lineuniqId == p.uniqueId) {
+                    //     log.error('lineuniqId', lineuniqId)
+                    //     log.error('p.uniqueId', p.uniqueId)
+                    // }
+                    // return Number(p.uniqueId) == Number(lineuniqId);
                 });
 
                 if (!payloadItem) {
@@ -252,9 +272,48 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
         } catch (e) {
             log.error('Item Receipt Creation Error', e);
-            throw new Error('ITEM_RECEIPT_CREATION_FAILED: ' + e.message);
+           // throw new Error('ITEM_RECEIPT_CREATION_FAILED: ' + e.message);
         }
     }
+
+    function updatesolines(soId, payloadItems) {
+        try {
+            var soRec = record.load({
+                type: record.Type.SALES_ORDER,
+                id: soId,
+                isDynamic: false
+            });
+
+            var lineCount = soRec.getLineCount({ sublistId: 'item' });
+
+            for (var i = 0; i < lineCount; i++) {
+                var unique_Id = soRec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'lineuniquekey',
+                    line: i
+                });
+                var payloadItem = payloadItems.find(function (p) {
+                    return Number(p.uniqueId) == Number(unique_Id);
+                });
+                if (payloadItem) {
+                    soRec.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jyswms_picked_qty',
+                        line: i,
+                        value: Number(payloadItem.return_qty)
+                    });
+                }
+            }
+            soRec.save({
+                enableSourcing: false,
+                ignoreMandatoryFields: true
+            });
+            log.debug('Success', 'Retuned quantities updated successfully');
+        } catch (error) {
+            log.error('error in updating so', error)
+        }
+    }
+
 
 
     // =========================
@@ -348,7 +407,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     itemInternalId: result.getValue({ name: "item" }),
                     itemName: result.getText({ name: "item" }),
                     quantity: Number(result.getValue({ name: "quantity" })) || 0,
-                    receiveQty: Number(result.getValue({ name: "custcol_jyswms_picked_qty" })) || 0,
+                    pickedQty: Number(result.getValue({ name: "custcol_jyswms_picked_qty" })) || 0,
                     uniqueId: result.getValue({ name: "lineuniquekey" })
                 });
 
@@ -362,7 +421,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
             return {
                 success: true,
-                data: salesOrderArray   
+                data: salesOrderArray
             };
 
 
