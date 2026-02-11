@@ -1,5 +1,5 @@
 /**
- * @NApiVersion 2.x
+ * @NApiVersion 2.1
  * @NScriptType ClientScript
  */
 define(['N/search','N/currentRecord','N/ui/message','N/log'], function (search, currentRecord, message, log) {
@@ -8,7 +8,7 @@ define(['N/search','N/currentRecord','N/ui/message','N/log'], function (search, 
 
     /* ---------------- PAGE INIT ---------------- */
     function pageInit(context) {
-        alert('JYSWMS Client Script Loaded');
+       // alert('JYSWMS Client Script Loaded');
         var rec = context.currentRecord;
        
         var customer = rec.getValue({ fieldId: 'entity' });

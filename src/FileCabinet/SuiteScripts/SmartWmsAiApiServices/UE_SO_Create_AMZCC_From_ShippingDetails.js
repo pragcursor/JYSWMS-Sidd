@@ -21,7 +21,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             });
 
             if (!isCreateAmz) {
-                log.debug('Skipped', 'Checkbox not checked');
+               // log.debug('Skipped', 'Checkbox not checked');
                 return;
             }
 
@@ -31,7 +31,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             });
 
             if (!shippingHeaderId) {
-                log.error('Missing Header', 'custbody_shipping_details_header is empty');
+              //  log.debug('Missing Header', 'custbody_shipping_details_header is empty');
                 return;
             }
 
@@ -53,7 +53,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             });
 
             var resultCount = shippingSearch.runPaged().count;
-            log.debug('Shipping Search Count', resultCount);
+           // log.debug('Shipping Search Count', resultCount);
 
             shippingSearch.run().each(function (result) {
 
@@ -72,12 +72,12 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             });
 
             if (!trackingObj.length) {
-                log.debug('No Data', 'No shipping detail records found');
+               // log.debug('No Data', 'No shipping detail records found');
                 return;
             }
 
             // 4. Load Sales Order
-            log.error("salesOrderId", salesOrderId);
+          //  log.debug("salesOrderId", salesOrderId);
 
             var salesOrderRec = record.load({
                 type: record.Type.SALES_ORDER,
@@ -150,7 +150,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
         }
     }
 
-  function beforeLoad(context) {
+    function beforeLoad(context) {
         if (context.type !== context.UserEventType.VIEW) {
             return;
         }
@@ -221,8 +221,10 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
         `;
     }
 
+
+
     return {
         afterSubmit: afterSubmit,
-        beforeLoad: beforeLoad
+        beforeLoad: beforeLoad,
     };
 });

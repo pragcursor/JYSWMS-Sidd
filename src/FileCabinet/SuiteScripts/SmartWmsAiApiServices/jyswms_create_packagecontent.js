@@ -14,9 +14,9 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var recordId = newRec.id;
 
 
-            //   if (newRec.getValue('custrecord_jyswms_processing_lock')) {
-            //     return;
-            //   }
+            // if (newRec.getValue('custrecord_jyswmws_perform_update')) {
+            //   return;
+            // }
             var isApproved = newRec.getValue('custrecord_jyswms_approved');
             var itemFulfill = newRec.getValue('custrecord_jyswms_rel_item_ful');
             var salesOrderId = newRec.getValue('custrecord_jyswms_sales_order_id');
@@ -26,10 +26,13 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var isUpsPackageUpdated = newRec.getValue('custrecord_jswms_order_ups_packges');
             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
 
-
-         if(!isApproved ){
-            return;
-          }
+            var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
+            if (donttrigger) {
+                return;
+            }
+            if (!isApproved) {
+                return;
+            }
 
 
             var locationLookup = search.lookupFields({
@@ -75,8 +78,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     if (!isPackageUpdated) {
 
 
-                       // log.error(" isUpsPackageContentUpdated", trackingObj);
-                        var updatedRecord = createPackageContent(trackingObj, itemFulfill, shipVia, canadaCustomerId);
+                        // log.error(" isUpsPackageContentUpdated", trackingObj);
+                        var updatedRecord = createPackageContent(trackingObj, itemFulfill, shipVia, canadaCustomerId, recordId);
 
                         record.submitFields({
                             type: 'customrecord_order_fulfillment_details',
@@ -116,22 +119,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 return;
 
             }
-            // log.error('Trigger Info', { recordId, isApproved, itemFulfill, carrierProNumber, salesOrderId });
 
-            // var locationLookup = search.lookupFields({
-            //   type: search.Type.SALES_ORDER,
-            //   id: salesOrderId,
-            //   columns: ['location', 'entity']
-            // });
-
-            // var locationId = (locationLookup.location && locationLookup.location.length)
-            //   ? locationLookup.location[0].value
-            //   : null;
-
-            // var canadaCustomerId = (locationLookup.entity && locationLookup.entity.length)
-            //   ? locationLookup.entity[0].value
-            //   : null;
-            // log.error("CustomerId", canadaCustomerId);
 
             // Collect line details
             var lines = [];
@@ -196,7 +184,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 log.error("pa records update ");
 
                 if (!isPackageUpdated) {
-                    var res = createPackageRecords(ssccCodes, trackingObj, itemFulfill, carrierProNumber);
+                    var res = createPackageRecords(ssccCodes, trackingObj, itemFulfill, carrierProNumber, recordId);
                     log.error("isPackageUpdated", res);
                 }
 
@@ -326,7 +314,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
     }
 
     // ups packages
-    function createPackageContent(trackingObj, fulfillmentId, shipVia, canadaCustomerId) {
+    function createPackageContent(trackingObj, fulfillmentId, shipVia, canadaCustomerId, recordId) {
         try {
             // if (!packageIds || packageIds.length === 0) {
             //    log.error("packageIds.length - ",packageIds.length );
@@ -340,7 +328,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
             var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
             var existingCount = fulfillmentRec.getLineCount({ sublistId });
- log.error("existingCount - recmachcustrecord_hj_packagecontents_sublist ", existingCount)
+            log.error("existingCount - recmachcustrecord_hj_packagecontents_sublist ", existingCount)
 
             var removecount = 0;
 
@@ -361,13 +349,13 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
                 var tracking = line.tracking;
 
-                
+
 
                 // Skip if tracking number is empty
                 if (!tracking) {
                     return;
                 }
-               
+
 
 
                 if (canadaCustomerId == "1807" || canadaCustomerId == "476") {
@@ -382,15 +370,15 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
 
 
-             
+
 
                 //Mark as processed
                 seenTrackingNumbers[tracking] = true;
-               
+
                 lastRecordId = line.recordId;
-              
+
                 packageBoxNumber++;
-              
+
                 fulfillmentRec.selectNewLine({ sublistId });
 
                 var fieldMap = {
@@ -398,12 +386,16 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     custrecordhj_pkgbox: packageBoxNumber,
                     custrecordhj_tc_packagecontentslbs: line.weight || 1,
                     custrecordhj_ucc: line.ssccCode,
+                    custrecord_jyswms_related_cif: recordId,
                     custrecord_jyswms_createdfrom: true,
                     custrecordhj_pkg_trackingnumber: line.bolTrackingNumber || line.tracking,
                     custrecordhj_pkg_desc: line.itemName + '/1'
                 };
-                
+
                 Object.keys(fieldMap).forEach(function (fieldId) {
+
+                    log.error("fieldMap", JSON.stringify(fieldMap));
+
                     var value = fieldMap[fieldId];
                     if (value !== null && value !== '' && value !== undefined) {
                         try {
@@ -432,7 +424,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             log.audit('New Packages Created', `Fulfillment ID: ${fulfillmentId}`);
             //}
         } catch (error) {
-            log.error("error while updating create packaes", error.message)
+            log.error('Package Error FULL', JSON.stringify(error));
         }
     }
 
@@ -526,7 +518,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     }
                 }
 
-                log.audit('Amazon Record line added', JSON.stringify(fieldMap));
+                //log.audit('Amazon Record line added', JSON.stringify(fieldMap));
                 salesOrderRec.commitLine({ sublistId: sublistId });
             });
 
@@ -635,7 +627,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     }
                 }
 
-                log.audit('Amazon Record line added', JSON.stringify(fieldMap));
+                // log.audit('Amazon Record line added', JSON.stringify(fieldMap));
                 salesOrderRec.commitLine({ sublistId: sublistId });
             });
 
@@ -667,7 +659,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
    * @param {Array} trackingObj - list of tracking data (each item = {recordId, palletNumber, weight, ssccCode, bolTrackingNumber, itemName})
    * @param {Number} fulfillmentId - internal ID of the Item Fulfillment
    */
-    function createPackageRecords(ssccCodes, trackingObj, fulfillmentId, carrierProNumber) {
+    function createPackageRecords(ssccCodes, trackingObj, fulfillmentId, carrierProNumber, recordId) {
         try {
 
             log.error("Debug Info", {
@@ -719,6 +711,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                         custrecordhj_pkgbox: packageBoxNumber,
                         custrecordhj_tc_packagecontentslbs: line.weight || 1,
                         custrecordhj_ucc: line.ssccCode,
+                        custrecord_jyswms_related_cif: recordId,
                         custrecord_jyswms_createdfrom: true,
                         custrecordhj_pkg_trackingnumber: line.bolTrackingNumber,
                         custrecordhj_pkg_desc: line.itemName + '/1'
@@ -791,6 +784,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                             values: {
                                 custrecord_hj_packagecontents_sublist: fulfillmentId,
                                 custrecordhj_pkg_trackingnumber: carrierProNumber,
+                                custrecord_jyswms_related_cif: recordId,
                                 custrecord_jyswms_createdfrom: true,
                                 custrecordhj_pkgbox: packageBoxNumber,
                             }
@@ -995,6 +989,6 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
         }
     }
 
-    return { afterSubmit: afterSubmit, beforeSubmit: beforeSubmit};
+    return { afterSubmit: afterSubmit, beforeSubmit: beforeSubmit };
 
 });

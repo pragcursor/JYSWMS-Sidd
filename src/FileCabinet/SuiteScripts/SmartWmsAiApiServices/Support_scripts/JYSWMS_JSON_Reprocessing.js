@@ -20,19 +20,22 @@ define([
             try {
                 //  Backend processing
                 var result = forceFullFillorder.fullFillOrder(soId);
-               // context.response.write('Processing Result: ' + JSON.stringify(result));
+               context.response.write('Processing Result: ' + JSON.stringify(result));
                // Reload with SUCCESS message
-                context.response.write(`
-                    <html><body>
-                        <script>
-                            window.location.href =
-                                window.location.pathname +
-                                '?status=success&message=${encodeURIComponent(
-                                    'Sales Order ' + soId + ' processed successfully'
-                                )}';
-                        </script>
-                    </body></html>
-                `);
+
+                       context.response.write(JSON.stringify(result, null, 2));
+
+                // context.response.write(`
+                //     <html><body>
+                //         <script>
+                //             window.location.href =
+                //                 window.location.pathname +
+                //                 '?status=success&message=${encodeURIComponent(
+                //                     'Sales Order ' + soId + ' processed successfully'
+                //                 )}';
+                //         </script>
+                //     </body></html>
+                // `);
             } catch (e) {
 
                 // Reload with ERROR message

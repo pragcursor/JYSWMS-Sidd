@@ -21,6 +21,16 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var fulfillPartilly = newRec.getValue({ fieldId: 'custrecord_jyswms_is_partially_fulfilled' });
             var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' }) || "";
             var lineLineLocation = locationId;
+            var singleIf = newRec.getValue({ fieldId: 'custrecord_jywms_single_if_from_customer' });
+             var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
+
+            if (itemFulfill) {
+                return;
+            }
+          
+            if (donttrigger) {
+                return;
+            }
 
             if (fulfillPartilly && !isApproved) {
 
@@ -153,14 +163,16 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 log.error('itemIdsInOrder', itemIdsInOrder);
                 var itemName = '';
                 if (itemIdsInOrder.length === 1) {
+                    // get the item type from the array 
                     var itemTypeLookup = search.lookupFields({
                         type: search.Type.ITEM,
                         id: Number(itemIdsInOrder[0]),
                         columns: ['recordtype', "itemid"]
                     });
+                    log.error('itemTypeLookup', itemTypeLookup);
                     itemName = itemTypeLookup.itemid || '';
-                    if (itemTypeLookup.recordtype === 'noninventoryitem' && itemName.toLowerCase().includes('parts')) {
-                        // transform the sales order to item fulfillment directly for non inventory item PARTS
+                    if (itemTypeLookup.recordtype === 'noninventoryitem') {
+                        // transform the sales order to item fulfillment directly
                         var itemFulfillment = record.transform({
                             fromType: record.Type.SALES_ORDER,
                             fromId: salesOrderId,
@@ -209,8 +221,17 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 }
                 lines = Object.values(linesMap);
 
+                // record.submitFields({
+                //             type: 'customrecord_order_fulfillment_details',
+                //             id: recordId,
+                //             values: {
+                //                 custrecord_jyswms_total_pick_qty: totalQuantity
+                //             }
+                //         });
+
+
                 // ✅ Validate totals
-                if (headerPickedQty !== totalQuantity) {
+                if (headerPickedQty !== totalQuantity && singleIf ) {
 
                     if (totalQuantity == totalSoQuantity) {
 
@@ -236,6 +257,15 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         return;
                     }
                 }
+              else{
+                  record.submitFields({
+                            type: 'customrecord_order_fulfillment_details',
+                            id: recordId,
+                            values: {
+                                custrecord_jyswms_total_pick_qty: totalQuantity
+                            }
+                        });
+              }
 
                 log.error("FINAL MERGED LINES", JSON.stringify(lines));
 

@@ -29,8 +29,8 @@ define(['N/https', 'N/log'], function (https, log) {
             return null;
 
         } catch (e) {
-            log.error('generateToken Error', e.message);
-            return null;
+            log.error('generateToken Error', e);
+           // return null;
         }
     }
     return {

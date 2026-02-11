@@ -26,15 +26,52 @@ define([
             //     return;
             // }
             // log.debug('afterSubmit', 'Record Type: ' + recType + ', Record ID: ' + recId);
+            if (customerId === 476 || customerId === 1807) {
+                log.debug('Skipping JYS WMS Logic', 'Customer ID 476 or 1807 is excluded from JYS WMS processing');
+            } else if(customerId != 476 && customerId != 1807) {
+                var isJysWmsEnabled = search.lookupFields({
+                    type: record.Type.CUSTOMER,
+                    id: customerId,
+                    columns: ['custentity_jyswms_enable', 'entityid']
+                });
+                var isenabled = isJysWmsEnabled.custentity_jyswms_enable;
+                if (!isenabled) {
+                    return;
+                }
+                var customerName = isJysWmsEnabled.entityid;
+                // -----------------------------
+                // INDEPENDENT APPROVAL LOGIC
+                // -----------------------------
 
-            var isJysWmsEnabled = search.lookupFields({
-                type: record.Type.CUSTOMER,
-                id: customerId,
-                columns: ['custentity_jyswms_enable']
-            }).custentity_jyswms_enable;
+                var approvalDone = newRecord.getValue('custbody_jyswms_approval_processed');
+                var orderStatus = newRecord.getValue('orderstatus'); // A = Pending Approval
 
-            if (!isJysWmsEnabled) {
-                return;
+                if (
+                    isenabled &&
+                    !approvalDone &&
+                    orderStatus === 'A'
+                ) {
+                    record.submitFields({
+                        type: record.Type.SALES_ORDER,
+                        id: recId,
+                        values: {
+                            orderstatus: 'B', // Approved
+                           // custbody_wms_ready_to_ship: true,
+                            custbody_reason_approval: 'JYS WMS Auto Approval',
+                            custbody_jyswms_approval_processed: true
+                        },
+                        options: {
+                            enableSourcing: false,
+                            ignoreMandatoryFields: true
+                        }
+                    });
+
+                    log.audit(
+                        'Sales Order Approved - ('+ customerName +'):',
+                        'SO ID ' + recId
+                    );
+                }
+
             }
 
             var apiResult = sendData(recId);
@@ -44,12 +81,12 @@ define([
             }
 
             if (!apiResult.response) {
-               // log.error('API Error', 'Empty response');
+                // log.error('API Error', 'Empty response');
                 return;
             }
 
             var responseObj = JSON.parse(apiResult.response || '{}');
-           log.debug('API Response for SO ID ' + recId, JSON.stringify(responseObj));
+           // log.debug('API Response for SO ID ' + recId, JSON.stringify(responseObj));
             var sourceArray = [];
             if (responseObj.completed && responseObj.completed.length > 0) {
                 sourceArray = responseObj.completed;
@@ -58,7 +95,7 @@ define([
             }
             //log.debug('Source Array', JSON.stringify(sourceArray));
             if (sourceArray.length === 0) {
-               // log.debug('No Data for Record ID ' + recId, 'No completed or notcompleted records found');
+                // log.debug('No Data for Record ID ' + recId, 'No completed or notcompleted records found');
                 return;
             }
 
@@ -71,9 +108,9 @@ define([
                     pickedQtyMap[line.item] = (pickedQtyMap[line.item] || 0) + qty;
                 }
             });
-            log.debug('Picked Qty Map', JSON.stringify(pickedQtyMap));
+            //log.debug('Picked Qty Map', JSON.stringify(pickedQtyMap));
             if (Object.keys(pickedQtyMap).length === 0) {
-                log.debug('No Picked Items', 'No picked items found in API response');
+               // log.debug('No Picked Items', 'No picked items found in API response');
                 return;
             }
 
@@ -108,10 +145,10 @@ define([
                 ignoreMandatoryFields: true
             });
 
-            log.debug('Success', 'Picked quantities updated successfully');
+           // log.debug('Success', 'Picked quantities updated successfully');
 
         } catch (e) {
-            log.error('afterSubmit Error', e);
+            log.error('afterSubmit Error for Record ID ' + recId, e);
         }
     }
 
@@ -125,7 +162,7 @@ define([
 
         try {
             const response = https.get({
-                url: 'https://api.jyswms.com/dropship-sales-order-status?sales_order_id=' + recId,              
+                url: 'https://api.jyswms.com/dropship-sales-order-status?sales_order_id=' + recId,
                 headers: {
                     'Authorization': 'Bearer ' + token,
                     'Content-Type': 'application/json'

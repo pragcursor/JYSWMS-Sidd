@@ -215,7 +215,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                     var itemslength = parsedSoItemsArr.length || 0;
 
                     var existBinArr = getBinTransferinfo(result, itemPrimaryUnitsMap); // always array
-                    log.error("existBinArr", existBinArr);
+                    //log.error("existBinArr", existBinArr);
 
                     // Safety: ensure it's an array
                     if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
@@ -533,7 +533,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                             log.error("ItemId Not Found", singleItemText);
                         }
                     } else {
-                        log.error("Multiple Items Detected", uniqueArr.join(", "));
+                        //log.error("Multiple Items Detected", uniqueArr.join(", "));
                     }
 
 
@@ -3674,7 +3674,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             });
 
             var ScriptEndTime = new Date().getTime();
-            log.error('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
+           // log.error('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
             // log.audit('Final recordData', JSON.stringify(recordData));
 
             return {
@@ -4334,7 +4334,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
 
                     // Get bin rows for this item/result — helper returns an ARRAY (guaranteed)
                     var existBinArr = getBinTransferinfo(result, itemPrimaryUnitsMap); // always array
-                    log.error("existBinArr", existBinArr);
+                   // log.error("existBinArr", existBinArr);
 
                     // Safety: ensure it's an array
                     if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
@@ -4640,7 +4640,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
 
                     // Get bin rows for this item/result — helper returns an ARRAY (guaranteed)
                     var existBinArr = getBinTransferinfo(result, itemPrimaryUnitsMap); // always array
-                    log.error("existBinArr", existBinArr);
+                   // log.error("existBinArr", existBinArr);
 
                     // Safety: ensure it's an array
                     if (!Array.isArray(existBinArr) || existBinArr.length === 0) {

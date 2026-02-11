@@ -11,6 +11,8 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
         log.error("orderData", orderData);
         var transformed = transformItems(orderData);
         log.error("transformed", transformed);
+
+      return transformed;
         var orderByLocation = transformed.output;
         var itemIds = transformed.itemIds || [];
 
@@ -24,8 +26,11 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
             var orderDataObject = orderByLocation[locationId];
             // do something with key & value
+           log.error("orderDataObject", orderDataObject);
 
-            var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIds);
+            var itemAvailQty = getItemAvailableQtyMapByLocation(itemIds, locationId);
+
+          var adjustmentObj = {};
 
             for (key in orderDataObject.items) {
                 var itemInternalId = key;
@@ -36,7 +41,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
                 if (quantity) {
 
-                    var trackingNumbersLength = dbObj.trackingNumbers.length;
+                    var trackingNumbersLength = itemData.trackingNumber.length;
 
                     if (trackingNumbersLength > 0) {
                         var fullfillmentQty = itemData.quantity;
@@ -76,7 +81,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
                 }
 
-                var trackingObjects = buildTrackingObjectsFromJson(orderDataObject.output);
+                var trackingObjects = buildTrackingObjectsFromJson(orderDataObject);
                 log.error("trackingObjects", trackingObjects);
 
                 var fullfillmentId = "";
@@ -91,12 +96,14 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
                         log.error("soStatus", JSON.stringify(soStatus));
 
-                        if (soStatus.status[0].value === 'C') { // Check if status is 'B' (Billed)
+                        if (soStatus.status[0].value === 'closed') { // Check if status is 'B' (Billed)
                             var salesOrderRecord = record.load({
                                 type: record.Type.SALES_ORDER,
                                 id: salesOrderId,
-                                isDynamic: true
+                                isDynamic: false
                             });
+
+                       //   soStatus	2/9/2026	10:43 am	McCallister, Kevin	{"status":[{"value":"closed","text":"Closed"}]}
 
                             var itemCount = salesOrderRecord.getLineCount({ sublistId: 'item' });
 
@@ -128,99 +135,124 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                             isDynamic: true
                         });
 
-                      
+                        log.error("salesOrderId",salesOrderId);
+
 
                         fullfillorder.setValue({ fieldId: 'location', value: locationId});
                        
-
+  log.error("locationId",locationId);
                         var linecount = fullfillorder.getLineCount({ sublistId: 'item' });
-
-                        for (var j = 0; j < linecount; j++) {
-
-                            var itemName = fullfillorder.getSublistValue({
-                                sublistId: 'item',
-                                fieldId: 'item',
-                                line: j
-                            });
-
-                            if (orderDataObject.items[item]) {
-                                var dbObj = orderDataObject.items[item];
-                                var quantity = dbObj.quantity;
-
-                                if (quantity) {
-
-                                    var trackingNumbersLength = dbObj.trackingNumber.length;
-
-                                    if (trackingNumbersLength > 0) {
-
-                                        var fullfillmentQty = trackingNumbersLength;
-
-                                        fullfillorder.setCurrentSublistValue({
-                                            sublistId: 'item',
-                                            fieldId: 'location',
-                                            line: j,
-                                            value: locationId
-                                        });
-
-                                        // Set quantity
-                                        fullfillorder.setCurrentSublistValue({
-                                            sublistId: 'item',
-                                            fieldId: 'quantity',
-                                            line: j,
-                                            value: fullfillmentQty
-                                        });
+                      log.error("linecount",linecount);
 
 
+                     for (var j = 0; j < linecount; j++) {
 
-                                        var bulkStageBin = (locationId == 9) ? 4859 : 16692;
-                                        //log.error({ title: 'bulkStageBin', details: bulkStageBin });
+    // MUST select line in dynamic mode
+    fullfillorder.selectLine({
+        sublistId: 'item',
+        line: j
+    });
 
-                                        var inventoryDetailSubrecord = fullfillorder.getCurrentSublistSubrecord({
-                                            sublistId: 'item',
-                                            fieldId: 'inventorydetail',
-                                            create: true
-                                        });
+    var item = fullfillorder.getCurrentSublistValue({
+        sublistId: 'item',
+        fieldId: 'item'
+    });
 
-                                        if (!inventoryDetailSubrecord) {
-                                            throw new Error(' Unable to create Inventory Detail Subrecord on line ' + j);
-                                        }
+    if (orderDataObject.items[item]) {
 
-                                        var existingLines = inventoryDetailSubrecord.getLineCount({ sublistId: 'inventoryassignment' });
-                                        for (var k = existingLines - 1; k >= 0; k--) {
-                                            inventoryDetailSubrecord.removeLine({ sublistId: 'inventoryassignment', line: k });
-                                        }
+        var dbObj = orderDataObject.items[item];
+        var quantity = parseFloat(dbObj.quantity) || 0;
 
-                                        inventoryDetailSubrecord.selectNewLine({ sublistId: 'inventoryassignment' });
+        if (quantity > 0) {
 
-                                        inventoryDetailSubrecord.setCurrentSublistValue({
-                                            sublistId: 'inventoryassignment',
-                                            fieldId: 'binnumber',
-                                            value: bulkStageBin  // Use the first bin directly binLine.binId
-                                        });
+            var trackingNumbersLength =
+                (dbObj.trackingNumber && dbObj.trackingNumber.length) || 0;
 
-                                        inventoryDetailSubrecord.setCurrentSublistValue({
-                                            sublistId: 'inventoryassignment',
-                                            fieldId: 'quantity',
-                                            value: fullfillmentQty  // Assign full quantity directly binLine.qty
-                                        });
+            var fulfillmentQty = trackingNumbersLength || quantity;
 
-                                        inventoryDetailSubrecord.commitLine({ sublistId: 'inventoryassignment' });
+            // set location at line level
+            fullfillorder.setCurrentSublistValue({
+                sublistId: 'item',
+                fieldId: 'location',
+                value: locationId
+            });
 
-                                        fullfillorder.commitLine({ sublistId: 'item' });
+            //  set quantity
+            fullfillorder.setCurrentSublistValue({
+                sublistId: 'item',
+                fieldId: 'quantity',
+                value: fulfillmentQty
+            });
 
-                                    }
+            // -------- Inventory Detail --------
+            var inventoryDetailSubrecord =
+                fullfillorder.getCurrentSublistSubrecord({
+                    sublistId: 'item',
+                    fieldId: 'inventorydetail'
+                });
 
-                                }
-                            }
-                        }
+            if (!inventoryDetailSubrecord) {
+                inventoryDetailSubrecord =
+                    fullfillorder.createCurrentSublistSubrecord({
+                        sublistId: 'item',
+                        fieldId: 'inventorydetail'
+                    });
+            }
 
+            // Remove existing inventory assignment lines
+            var existingLines =
+                inventoryDetailSubrecord.getLineCount({
+                    sublistId: 'inventoryassignment'
+                });
+
+            for (var k = existingLines - 1; k >= 0; k--) {
+                inventoryDetailSubrecord.removeLine({
+                    sublistId: 'inventoryassignment',
+                    line: k
+                });
+            }
+
+            var bulkStageBin = (locationId == 9) ? 4859 : 16692;
+
+            inventoryDetailSubrecord.selectNewLine({
+                sublistId: 'inventoryassignment'
+            });
+
+            inventoryDetailSubrecord.setCurrentSublistValue({
+                sublistId: 'inventoryassignment',
+                fieldId: 'binnumber',
+                value: bulkStageBin
+            });
+
+            inventoryDetailSubrecord.setCurrentSublistValue({
+                sublistId: 'inventoryassignment',
+                fieldId: 'quantity',
+                value: fulfillmentQty
+            });
+
+            inventoryDetailSubrecord.commitLine({
+                sublistId: 'inventoryassignment'
+            });
+        }
+    }
+
+    // MUST commit item line
+    fullfillorder.commitLine({
+        sublistId: 'item'
+    });
+}
+ fullfillorder.setValue({ fieldId: 'shipstatus', value: 'C' });
                         fullfillmentId = fullfillorder.save();
+                      log.error("fullfillmentId",fullfillmentId)
                     }
                     catch (e) {
                         log.error("Error in fullFillOrder", e.message);
                     }
 
                     if (fullfillmentId) {
+
+                      log.error("ready for packages",fullfillmentId)
+                      
 
                         var obj = trackingObjects;
 
@@ -419,7 +451,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     var fieldMap = {
                         custrecord_sales_order_id: salesOrderId,
                         custrecord_amzcc_code: amzccCode,
-                        custrecord_itemid: line.itemName,
+                        custrecord_itemid: line.itemId,
                         custrecord_ucc_code: line.upcCode,
                         custrecord_wms_bulkbatch_picking: 22306500,
                         custrecord_ponumber: line.poNumber,
@@ -473,6 +505,9 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
         function packageContents(trackingObj, fullfillmentId) {
             try {
+
+              log.error("trackingObj",trackingObj);
+              log.error("fullfillmentId",fullfillmentId);
                 trackingObj.forEach(function (track) {
 
                     // if (!track || !track.ssccCode) {
@@ -493,7 +528,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     // }
 
 
-                    log.error("track", track);
+                    // log.error("track", track);
 
                     var packageRec = record.create({
                         type: 'customrecordhj_tc_package_contents',
@@ -599,12 +634,14 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
         }
 
-        function getItemAvailableQtyMapByLocation(itemIdsInOrder) {
+        function getItemAvailableQtyMapByLocation(itemIdsInOrder,locationId) {
 
             var itemQtyMap = {};
 
             var filters = [
                 ["binonhand.quantityonhand", "greaterthan", "0"],
+                "AND",
+                ["binonhand.location", "anyof", locationId],
                 "AND",
                 ["binonhand.binnumber", "anyof", "16692", "4859"]
             ];
@@ -672,6 +709,9 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
         }
 
         function buildTrackingObjectsFromJson(orderJson) {
+
+          log.error("orderJson",orderJson)
+          
             var results = [];
 
             if (!orderJson || !orderJson.items) {
@@ -685,7 +725,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                 var itemObj = orderJson.items[itemKey];
 
                 var upcCode = itemObj.upcCode || '';
-                var weight = itemObj.weight || '';
+                var weight = itemObj.itemWeight || '';
 
 
                 if (!upcCode || !weight) {
@@ -703,7 +743,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                 var qty = parseFloat(itemObj.quantity);
                 if (!qty || qty <= 0) continue;
 
-                var trackingArr = itemObj.tracking_numbers || [];
+                var trackingArr = itemObj.trackingNumber || [];
 
                 for (var i = 0; i < trackingArr.length; i++) {
                     var track = trackingArr[i];
@@ -711,15 +751,15 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     var obj = {
                         itemInternalId: itemObj.itemInternalId || '',      // internal id if available
                         itemId: itemObj.item,                    // item name / SKU
-                        trackingNumber: track.trackingNumber,
+                        trackingNumber: track.tracking_number,
                         salesOrder: orderJson.transactionId,    // SO number
                         soHeader: orderJson.internalId || "",
                         bolTrackingNumber: carrierCode,
-                        ssccCode: track.sscCode,     // SO internal id
+                        ssccCode: track.sscc_code,     // SO internal id
                         qty: 1,                                  // 1 per SSCC (standard)
                         uniqueId: itemObj.uniqueId || '',
                         weight: weight || '',
-                        palletNumber: track.palletNumber || '',
+                        palletNumber: track.pallet_number || '',
                         upcCode: upcCode || '',
                         poNumber: orderJson.poNumber || ''
                     };
@@ -733,22 +773,36 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
         }
 
 
-        function transformItems(inputJson) {
+       /* function transformItems(inputJson) {
+
+          //log.error("inputJson",inputJson)
 
             var result = {};
             var itemIds = [];
             var itemMetaCache = {};
 
             if (!inputJson || !inputJson.items) {
+
+               log.error("!inputJson",inputJson)
                 return { output: result, itemIds: itemIds };
             }
+          // log.error("inputJson",JSON.stringify(inputJson.items));
 
             for (var key in inputJson.items) {
                 if (!inputJson.items.hasOwnProperty(key)) continue;
 
                 var itemObj = inputJson.items[key];
 
-                var locationId = itemObj.location_id;
+    //  Skip if not picked
+    if (!itemObj.is_picked) continue;
+
+    //  Skip if no tracking numbers
+    if (!itemObj.tracking_numbers || !itemObj.tracking_numbers.length) continue;
+              //  log.error("itemObj",itemObj)
+
+              var locationId = itemObj.location_id ||
+    (itemObj.location_name === 'Flemington L41' ? 9 : 15);
+
                 var itemId = itemObj.item_internal_id || key;
                 var qty = parseFloat(itemObj.quantity) || 0;
 
@@ -815,7 +869,101 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                 output: result,
                 itemIds: itemIds
             };
+        }  */
+function transformItems(inputJson) {
+
+    var result = {};
+    var itemIds = [];
+    var itemMetaCache = {};
+
+    if (!inputJson || !inputJson.items) {
+        log.error("Invalid input JSON", inputJson);
+        return { output: result, itemIds: itemIds };
+    }
+
+    for (var itemKey in inputJson.items) {
+        if (!inputJson.items.hasOwnProperty(itemKey)) continue;
+
+        var itemObj = inputJson.items[itemKey];
+        var itemId = itemObj.item_internal_id || itemKey;
+
+        // Track unique item IDs
+        if (itemIds.indexOf(itemId) === -1) {
+            itemIds.push(itemId);
         }
+
+        // Lookup item metadata once
+        if (!itemMetaCache[itemId]) {
+            var lookup = search.lookupFields({
+                type: search.Type.ITEM,
+                id: itemId,
+                columns: ['weight', 'upccode']
+            });
+
+            itemMetaCache[itemId] = {
+                weight: lookup.weight || 0,
+                upcCode: lookup.upccode || ''
+            };
+        }
+
+        var lines = itemObj.lines || [];
+        for (var i = 0; i < lines.length; i++) {
+
+            var line = lines[i];
+            var qty = parseFloat(line.quantity) || 0;
+
+            // 🔑 Location fallback logic
+            var locationId =
+                line.location_id ||
+                (line.location_name === 'Flemington L41' ? 9 : 15);
+
+            if (!locationId || qty <= 0) continue;
+
+            // Init location bucket
+            if (!result[locationId]) {
+                result[locationId] = {
+                    transactionId: inputJson.transaction_id,
+                    internalId: inputJson.internal_id,
+                    bolNumber: inputJson.bolNumber,
+                    items: {}
+                };
+            }
+
+            // Merge item into location bucket
+            if (result[locationId].items[itemId]) {
+
+                result[locationId].items[itemId].quantity += qty;
+
+                if (line.tracking_numbers && line.tracking_numbers.length) {
+                    result[locationId].items[itemId].trackingNumber =
+                        result[locationId].items[itemId].trackingNumber
+                            .concat(line.tracking_numbers);
+                }
+
+            } else {
+
+                result[locationId].items[itemId] = {
+                    item: itemObj.item,
+                    itemInternalId: itemId,
+                    upcCode: itemObj.upc_code || itemMetaCache[itemId].upcCode,
+                    itemWeight: itemMetaCache[itemId].weight,
+                    locationId: locationId,
+                    locationName: line.location_name || '',
+                    uniqueId: line.unique_id,
+                    quantity: qty,
+                    isPicked: line.is_picked,
+                    trackingNumber: line.tracking_numbers || []
+                };
+            }
+        }
+    }
+
+    return {
+        output: result,
+        itemIds: itemIds
+    };
+}
+
 
         function sendData(salesOrderId) {
 

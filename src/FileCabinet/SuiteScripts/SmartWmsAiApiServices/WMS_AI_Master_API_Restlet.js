@@ -5,14 +5,16 @@
 define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runtime',
     './Bin/binUtils',
     './Orders/orderUtils',
+    './Orders/JY_so_picked_stats_EOD',
     './Items/itemUtils',
     './Inventory/inventoryUtils',
     './Locations/locationUtils',
     './Tracking/trackingUtils',
     './Returns/returnUtils',
-    './partsPicking/partsPickedUtil'
-], function (file, record, error, log, https, search, runtime, binUtils, orderUtils, itemUtils,
-    inventoryUtils, locationUtils, trackingUtils, returnUtils, partsPickedUtil) {
+    './partsPicking/partsPickedUtil',
+    './markAsPicked/markAsPickedUtil'
+], function (file, record, error, log, https, search, runtime, binUtils, orderUtils, jySoPickedStatsEOD, itemUtils,
+    inventoryUtils, locationUtils, trackingUtils, returnUtils, partsPickedUtil, markAsPickedUtil) {
 
     function get(context) {
         try {
@@ -613,7 +615,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 };
             }
             var isExistsResp = ""
-           
+            // if (action == "post_returnOrders") {
+            //     return returnUtils.processReturn(context);
+            // }
             if (action == "submitPallet") {
                 try {
 
@@ -857,13 +861,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     response = orderUtils.processPalletUpdate(context);
                     break;
                 case 'sopicked_endoftheday':
-                    response = orderUtils.sopicked_endoftheday(context);
+                    response = jySoPickedStatsEOD.sopicked_endoftheday(context);
                     break;
                 case 'binTransfer':
                     response = binUtils.binTransfer(context, id);
                     break;
                 case 'markAsPicked':
-                    response = markAsPicked(context, id);
+                   // log.error("Context before markAsPicked", context);
+                   // response = markAsPickedUtil.markAsPicked(context.data);
+                     response = markAsPicked(context, id);
                     break;
                 case 'fullFillPartsOrders':
                     response = partsPickedUtil.fullFillPartsOrder(context, id);
@@ -948,7 +954,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             return response;
 
         } catch (e) {
-            log.error("error message", e.message);
+            log.error("error in main restlet", e);
             record.submitFields({
                 type: 'customrecord_wms_ai_api_custom_rec',
                 id: id,
@@ -1767,26 +1773,51 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     headerId = existingMap[salesOrderId];
                     log.error("headerId", headerId);
                     var headerRec;
+
+                  
+                   var isSingleIf = false;
+
                     if (headerId) {
+
+                        var lookup = search.lookupFields({
+                            type: 'customrecord_order_fulfillment_details',
+                            id: headerId,
+                            columns: ['custrecord_jywms_single_if_from_customer']
+                        });
+
+                        isSingleIf =
+                            lookup.custrecord_jywms_single_if_from_customer &&
+                            lookup.custrecord_jywms_single_if_from_customer.length > 0 &&
+                            lookup.custrecord_jywms_single_if_from_customer[0].value === 'T';
+                    }
+
+                    if (headerId && isSingleIf) {
+
+                        // Reuse existing header ONLY when checkbox is checked
                         headerRec = record.load({
                             type: 'customrecord_order_fulfillment_details',
                             id: headerId,
                             isDynamic: true
                         });
-                    } else {
 
+                    } else {
+                        //  Create new header when:
+                        // - no headerId
+                        // - OR checkbox is unchecked
                         headerRec = record.create({
                             type: 'customrecord_order_fulfillment_details',
                             isDynamic: true
                         });
+
                         headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
                         headerRec.setValue('custrecord_jyswms_portal_id', portalId);
                         headerRec.setValue('custrecord_jyswms_location_id', locationId);
-                        // Save new record first to get the ID before adding lines
+
                         headerId = headerRec.save();
-                        existingMap[salesOrderId] = headerId;
+
                         log.error("Created new header record", headerId);
                     }
+
 
                     // STEP 4: Create Bin Transfer
                     if (savedId) {
@@ -1863,6 +1894,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         if (!singleIf) {
                             headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
                             headerRec.setValue('custrecord_jyswms_approved', true);
+                            headerRec.setValue('custrecord_jyswmws_perform_update', true);
+                
                         }
                         headerRec.setValue('custrecord_jyswms_location_id', locationId);
 
@@ -2143,8 +2176,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     var totalSOQty = Number(soLookup.custbody_so_total_qty) || 0;
 
                     //  Calculate total picked quantity from all item lines
-                    var totalPickedQty = 0;
+                    var totalPickedQty = pickQty;
                     var lineCount = headerRec.getLineCount({ sublistId: 'recmachcustrecord_sales_order_header' });
+                  
                     for (var l = 0; l < lineCount; l++) {
                         var linePicked = Number(headerRec.getSublistValue({
                             sublistId: 'recmachcustrecord_sales_order_header',
@@ -2160,10 +2194,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     //  Compare totals and set Approved checkbox
                     var isApproved = (totalSOQty <= totalPickedQty);
+                    var singleIf =  headerRec.getValue({ fieldId: 'custrecord_jywms_single_if_from_customer' });
+                  
+                  if(singleIf) {
                     headerRec.setValue({
                         fieldId: 'custrecord_jyswms_approved',
                         value: isApproved ? true : false
                     });
+                  }
 
                     log.error('Header Totals and Approval', {
                         totalSOQty: totalSOQty,
@@ -2183,19 +2221,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             savedTransfers.push(savedId);
                         }
                         savedHeaders.push(headerId);
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
                     } catch (headerSaveError) {
@@ -2534,7 +2559,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             });
 
             var ScriptEndTime = new Date().getTime();
-            log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
+           // log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
 
 
 
@@ -2630,7 +2655,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             });
 
             var ScriptEndTime = new Date().getTime();
-            log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
+            //log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
 
             return {
                 status: 200,

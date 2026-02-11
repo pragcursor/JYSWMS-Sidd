@@ -6,6 +6,7 @@ define(['N/record', 'N/log'], function (record, log) {
 
     function sopicked_endoftheday(context) {
         try {
+            log.error('sopicked_endoftheday started', 'Context: ' + JSON.stringify(context));
             if (!context || !Array.isArray(context) || context.length === 0) {
                 log.debug('No data received', context);
                 return;
@@ -32,7 +33,7 @@ define(['N/record', 'N/log'], function (record, log) {
                         ignoreMandatoryFields: true
                     });
                     processed_socount++;
-                    log.debug('Sales Order processed: ', soId);
+                    log.error('Sales Order processed: ', soId);
 
                 } catch (e) {
                     log.error('Error processing SO', {
