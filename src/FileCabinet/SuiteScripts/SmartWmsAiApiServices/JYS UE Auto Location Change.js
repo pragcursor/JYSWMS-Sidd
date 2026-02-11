@@ -13,8 +13,6 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
             return;
         }
         try {
-
-
             const newRec = context.newRecord;
             const recordId = newRec.id;
             const recordtype = newRec.type;
