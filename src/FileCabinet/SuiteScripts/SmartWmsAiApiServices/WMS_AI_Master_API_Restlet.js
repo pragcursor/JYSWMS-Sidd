@@ -692,7 +692,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 }
 
             }
-            if (action != "submitPallet" && action != "dropShipmentData" && action !== "post_returnOrders") {
+            if (action != "submitPallet" && action != "dropShipmentData" && action !== "post_returnOrders" && action !== "sopicked_endoftheday") {
                 isExistsResp = lookForExistingRecords(context);
             }
             // if (action != "submitPallet") {
@@ -861,7 +861,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     response = orderUtils.processPalletUpdate(context);
                     break;
                 case 'sopicked_endoftheday':
-                    response = jySoPickedStatsEOD.sopicked_endoftheday(context);
+                    response = jySoPickedStatsEOD.sopicked_endoftheday(context.data);
                     break;
                 case 'binTransfer':
                     response = binUtils.binTransfer(context, id);

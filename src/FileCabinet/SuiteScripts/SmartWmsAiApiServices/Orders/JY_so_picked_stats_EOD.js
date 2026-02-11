@@ -6,13 +6,14 @@ define(['N/record', 'N/log'], function (record, log) {
 
     function sopicked_endoftheday(context) {
         try {
-            log.error('sopicked_endoftheday started', 'Context: ' + JSON.stringify(context));
-            if (!context || !Array.isArray(context) || context.length === 0) {
-                log.debug('No data received', context);
-                return;
+            var payload = context; // Assuming the payload is passed directly as the context
+            // log.error('Received payload', payload);
+            if (payload && payload.length < 0) {
+                log.error('No records to process', 'Payload is empty or invalid');
+                return { success: false, message: 'No records to process' };
             }
-            const processed_socount = '';
-            context.forEach(function (row) {
+            var processed_socount = 0;
+            payload.forEach(function (row) {
                 try {
                     // Adjust this line depending on your payload structure
                     var soId = row.internalid || row.soId || row;
@@ -33,21 +34,19 @@ define(['N/record', 'N/log'], function (record, log) {
                         ignoreMandatoryFields: true
                     });
                     processed_socount++;
-                    log.error('Sales Order processed: ', soId);
+                    // log.error('Sales Order processed: ', soId);
 
                 } catch (e) {
-                    log.error('Error processing SO', {
-                        soId: row,
-                        error: e
-                    });
+                    log.error('Error processing SO', e);
                 }
 
             });
 
-            log.Audit('sopicked_endoftheday', processed_socount + ' records processed')
+            log.audit('sopicked_endoftheday: '+ new Date(), processed_socount + ' records processed')
 
         } catch (error) {
             log.error('sopicked_endoftheday fatal error', error);
+            return { success: false, message: 'Error processing records', error: error };
         }
     }
 
