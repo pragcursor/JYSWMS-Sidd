@@ -323,7 +323,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
     function getSalesOrderForReturn(context) {
         try {
             var payload = context;
-            log.debug('Get Sales Order for Return Payload', payload);
+            log.error('Get Sales Order for Return Payload', payload);
 
             var soNum = payload.soNumber;
             var ponum = payload.poNumber;
@@ -340,14 +340,13 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 ["type", "anyof", "SalesOrd"], "AND",
                 ["mainline", "is", "F"], "AND",
                 ["taxline", "is", "F"], "AND",
-                ["cogs", "is", "F"], "AND",
                 ["shipping", "is", "F"]
             ];
 
             if (soNum) {
                 filters.push("AND", ["tranid", "is", soNum]);
             } else if (ponum) {
-                filters.push("AND", ["otherrefnum", "is", ponum]);
+                filters.push("AND", ["otherrefnum", "equalto", ponum]);
             } else if (customerName) {
                 filters.push("AND", ["customer.entityid", "haskeywords", customerName]);
             } else if (itemName) {
@@ -357,7 +356,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 filters.push("AND", ["shipzip", "is", shipzip]);
                 filters.push("AND", ["shipdate", "onorbefore", "monthbeforelasttodate"]);
             }
-
+            log.error('Search Filters', filters);
             var salesorderSearchObj = search.create({
                 type: "salesorder",
                 filters: filters,
@@ -376,7 +375,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
             var resultSet = salesorderSearchObj.run();
             var firstResult = resultSet.getRange({ start: 0, end: 1 });
-
+            log.error('First Search Result', firstResult);
             if (!firstResult || firstResult.length === 0) {
                 return {
                     success: false,
@@ -418,7 +417,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var salesOrderArray = Object.keys(salesOrderMap).map(function (key) {
                 return salesOrderMap[key];
             });
-
+            log.error('Final Sales Order Array', salesOrderArray);
             return {
                 success: true,
                 data: salesOrderArray

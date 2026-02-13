@@ -6,18 +6,17 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
 
     function fullFillOrder(salesOrderId) {
-        log.error("fullFillOrder triggered for SO ID", salesOrderId);
+      //  log.error("fullFillOrder triggered for SO ID", salesOrderId);
         var orderData = sendData(salesOrderId);
-        log.error("orderData", orderData);
+      //  log.error("orderData", orderData);
         var transformed = transformItems(orderData);
-        log.error("transformed", transformed);
+       // log.error("transformed", transformed);
 
-      return transformed;
+     // return transformed;
         var orderByLocation = transformed.output;
         var itemIds = transformed.itemIds || [];
 
-        log.error("itemIds", itemIds);
-        log.error("orderByLocation", orderByLocation);
+    
         //var locationId = Object.keys(orderDataObject)[0]; // Assuming one location per order as per original logic
       
         for (var locationId in orderByLocation) {
@@ -26,7 +25,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
             var orderDataObject = orderByLocation[locationId];
             // do something with key & value
-           log.error("orderDataObject", orderDataObject);
+        //   log.error("orderDataObject", orderDataObject);
 
             var itemAvailQty = getItemAvailableQtyMapByLocation(itemIds, locationId);
 
@@ -53,12 +52,12 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                 }
 
             }
-                log.error("adjustmentObj -- ", adjustmentObj);
+              //  log.error("adjustmentObj -- ", adjustmentObj);
 
                 if (Object.keys(adjustmentObj).length > 0) {
 
                     var response = createAdjustment(adjustmentObj, locationId);
-                    log.error("Inventory Adjustment Response", response);
+                   /// log.error("Inventory Adjustment Response", response);
 
                     //inventoryAdjRec.setValue({ fieldId: 'memo', value: 'Auto Positive Adjustment due to Bulk bin shortage for JYSWMS Order Fulfilment Details, ID ' });
 
@@ -140,9 +139,9 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
                         fullfillorder.setValue({ fieldId: 'location', value: locationId});
                        
-  log.error("locationId",locationId);
+  //log.error("locationId",locationId);
                         var linecount = fullfillorder.getLineCount({ sublistId: 'item' });
-                      log.error("linecount",linecount);
+                     // log.error("linecount",linecount);
 
 
                      for (var j = 0; j < linecount; j++) {
@@ -398,8 +397,8 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     log.debug('No SSCC codes provided, skipping Amazon record creation');
                     return;
                 }
-                log.error("trackingObj", trackingObj);
-                log.error("salesOrderId", salesOrderId);
+                log.error("trackingObj - amzcc", trackingObj);
+                log.error("salesOrderId - amzcc", salesOrderId);
                 var salesOrderRec = record.load({
                     type: record.Type.SALES_ORDER,
                     id: salesOrderId,
@@ -506,8 +505,8 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
         function packageContents(trackingObj, fullfillmentId) {
             try {
 
-              log.error("trackingObj",trackingObj);
-              log.error("fullfillmentId",fullfillmentId);
+              log.error("trackingObj -- packages",trackingObj);
+              log.error("fullfillmentId -- packages",fullfillmentId);
                 trackingObj.forEach(function (track) {
 
                     // if (!track || !track.ssccCode) {
@@ -773,104 +772,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
         }
 
 
-       /* function transformItems(inputJson) {
-
-          //log.error("inputJson",inputJson)
-
-            var result = {};
-            var itemIds = [];
-            var itemMetaCache = {};
-
-            if (!inputJson || !inputJson.items) {
-
-               log.error("!inputJson",inputJson)
-                return { output: result, itemIds: itemIds };
-            }
-          // log.error("inputJson",JSON.stringify(inputJson.items));
-
-            for (var key in inputJson.items) {
-                if (!inputJson.items.hasOwnProperty(key)) continue;
-
-                var itemObj = inputJson.items[key];
-
-    //  Skip if not picked
-    if (!itemObj.is_picked) continue;
-
-    //  Skip if no tracking numbers
-    if (!itemObj.tracking_numbers || !itemObj.tracking_numbers.length) continue;
-              //  log.error("itemObj",itemObj)
-
-              var locationId = itemObj.location_id ||
-    (itemObj.location_name === 'Flemington L41' ? 9 : 15);
-
-                var itemId = itemObj.item_internal_id || key;
-                var qty = parseFloat(itemObj.quantity) || 0;
-
-                if (!locationId || qty <= 0) continue;
-
-                // Track unique item ids
-                if (itemIds.indexOf(itemId) === -1) {
-                    itemIds.push(itemId);
-                }
-
-                // Init location bucket
-                if (!result[locationId]) {
-                    result[locationId] = {
-                        transactionId: inputJson.transaction_id,
-                        internalId: inputJson.internal_id,
-                        bolNumber: inputJson.bolNumber,
-                        items: {}
-                    };
-                }
-
-                // Lookup item data once
-                if (!itemMetaCache[itemId]) {
-                    var lookup = search.lookupFields({
-                        type: search.Type.ITEM,
-                        id: itemId,
-                        columns: ['weight', 'upccode']
-                    });
-
-                    itemMetaCache[itemId] = {
-                        weight: lookup.weight || 0,
-                        upcCode: lookup.upccode || ''
-                    };
-                }
-
-                // Merge item inside location
-                if (result[locationId].items[itemId]) {
-
-                    result[locationId].items[itemId].quantity += qty;
-
-                    if (itemObj.tracking_numbers && itemObj.tracking_numbers.length) {
-                        result[locationId].items[itemId].trackingNumber =
-                            result[locationId].items[itemId].trackingNumber
-                                .concat(itemObj.tracking_numbers);
-                    }
-
-                } else {
-
-                    result[locationId].items[itemId] = {
-                        item: itemObj.item,
-                        itemInternalId: itemId,
-                        upcCode: itemObj.upc_code || itemMetaCache[itemId].upcCode,
-                        itemWeight: itemMetaCache[itemId].weight,
-                        locationId: locationId,
-                        locationName: itemObj.location_name || '',
-                        uniqueId: itemObj.unique_id,
-                        quantity: qty,
-                        isPicked: itemObj.is_picked,
-                        trackingNumber: itemObj.tracking_numbers || []
-                    };
-                }
-            }
-
-            return {
-                output: result,
-                itemIds: itemIds
-            };
-        }  */
-function transformItems(inputJson) {
+       function transformItems(inputJson) {
 
     var result = {};
     var itemIds = [];

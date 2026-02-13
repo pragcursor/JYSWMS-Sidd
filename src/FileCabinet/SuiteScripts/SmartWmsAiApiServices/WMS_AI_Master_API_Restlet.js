@@ -48,8 +48,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     return getPurchaseOrderHistory(context);
                 case 'get_itemBasedInvoices':
                     return getItemBasedInvoices(context);
-                case 'get_nonAmazonDropShipOrders':
-                    return orderUtils.getNonAmazonDropShipOrders(context, pageSize, startIndex);
+                case 'get_OrderStatusUpdate':
+                    return getOrderStatusUpdate(context);
+                case 'get_amzlOrders':
+                    return orderUtils.getAmzlOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
                     return orderUtils.getDropShipOrders(context, pageSize, startIndex);
                 case 'getDropShipOrdersPerOrder':
@@ -433,6 +435,75 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             };
         }
     }
+
+    function getOrderStatusUpdate(request) {
+        try {
+            var soSearch = search.load({ id: 4923 });
+
+            var pageSize = 1000;
+            var pageNumber = request.page ? parseInt(request.page, 10) : 1;
+
+            var pagedData = soSearch.runPaged({ pageSize: pageSize });
+            var totalPages = pagedData.pageRanges.length;
+            var totalRecords = pagedData.count;
+
+            if (pageNumber < 1 || pageNumber > totalPages) {
+                return {
+                    status: 400,
+                    message: 'Invalid page number. Must be between 1 and ' + totalPages
+                };
+            }
+
+            var page = pagedData.fetch({ index: pageNumber - 1 });
+            var results = [];
+
+            page.data.forEach(function (result) {
+                var row = {};
+
+                soSearch.columns.forEach(function (col) {
+                    var rawKey = col.label || col.name;
+                    var key = toSnakeCase(rawKey);
+
+                    var text = result.getText(col);
+                    var value = result.getValue(col);
+
+                    row[key] = (text !== null && text !== '') ? text : value;
+                });
+
+                results.push(row);
+            });
+
+
+            var startIndex = (pageNumber - 1) * pageSize;
+            var endIndex = startIndex + results.length - 1;
+
+            return {
+                status: 200,
+                message: 'Data retrieved successfully',
+                summary: {
+                    total_records: totalRecords,
+                    total_pages: totalPages,
+                    records_per_page: pageSize,
+                    current_page: pageNumber,
+                    pagination_info: {
+                        start_index: startIndex,
+                        end_index: endIndex,
+                        has_next_page: pageNumber < totalPages,
+                        has_previous_page: pageNumber > 1
+                    }
+                },
+                data: results
+            };
+
+        } catch (e) {
+            return {
+                status: 500,
+                message: 'Error retrieving data',
+                error: e.message
+            };
+        }
+    }
+
 
     function getPurchaseOrderHistory(request) {
         try {
@@ -861,15 +932,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     response = orderUtils.processPalletUpdate(context);
                     break;
                 case 'sopicked_endoftheday':
-                    response = jySoPickedStatsEOD.sopicked_endoftheday(context.data);
+                    response = jySoPickedStatsEOD.sopicked_endoftheday(context);
                     break;
                 case 'binTransfer':
                     response = binUtils.binTransfer(context, id);
                     break;
                 case 'markAsPicked':
-                   // log.error("Context before markAsPicked", context);
-                   // response = markAsPickedUtil.markAsPicked(context.data);
-                     response = markAsPicked(context, id);
+                    // log.error("Context before markAsPicked", context);
+                    // response = markAsPickedUtil.markAsPicked(context.data);
+                    response = markAsPicked(context, id);
                     break;
                 case 'fullFillPartsOrders':
                     response = partsPickedUtil.fullFillPartsOrder(context, id);
@@ -1774,22 +1845,74 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     log.error("headerId", headerId);
                     var headerRec;
 
-                  
-                   var isSingleIf = false;
 
+                    var isSingleIf = false;
+
+                    // if (headerId) {
+
+
+
+
+                    //     var customerlookup = search.lookupFields({
+                    //         type: 'customrecord_order_fulfillment_details',
+                    //         id: headerId,
+                    //         columns: ['custrecord_jyswms_customer_frm_so']
+                    //     });
+
+                    //      var lookup = search.lookupFields({
+                    //         type: 'customrecord_order_fulfillment_details',
+                    //         id: headerId,
+                    //         columns: ['custrecord_jywms_single_if_from_customer']
+                    //     });
+
+                    //   log.error("lookup",JSON.stringify(lookup));
+
+                    //   log.error("lookup",JSON.stringify(customerlookup));
+
+                    //     isSingleIf =
+                    //         lookup.custrecord_jywms_single_if_from_customer &&
+                    //         lookup.custrecord_jywms_single_if_from_customer.length > 0 &&
+                    //         lookup.custrecord_jywms_single_if_from_customer[0].value === 'T';
+                    // }
                     if (headerId) {
 
-                        var lookup = search.lookupFields({
-                            type: 'customrecord_order_fulfillment_details',
-                            id: headerId,
-                            columns: ['custrecord_jywms_single_if_from_customer']
+                        log.error("headerId", headerId);
+
+                        const salesorderSearchObj = search.create({
+                            type: "salesorder",
+                            filters: [
+                                ["type", "anyof", "SalesOrd"],
+                                "AND",
+                                ["internalid", "anyof", salesOrderId],
+                                "AND",
+                                ["mainline", "is", "T"]
+                            ],
+                            columns: [
+                                search.createColumn({
+                                    name: "custentity_single_if",
+                                    join: "customer"
+                                })
+                            ]
                         });
 
-                        isSingleIf =
-                            lookup.custrecord_jywms_single_if_from_customer &&
-                            lookup.custrecord_jywms_single_if_from_customer.length > 0 &&
-                            lookup.custrecord_jywms_single_if_from_customer[0].value === 'T';
+                        salesorderSearchObj.run().each(function (result) {
+
+                            var singleIFValue = result.getValue({
+                                name: "custentity_single_if",
+                                join: "customer"
+                            });
+
+                            isSingleIf = singleIFValue === true || singleIFValue === 'T';
+
+                            return false; // Only one result expected
+                        });
+
+
+                        log.debug("Final isSingleIf", isSingleIf);
                     }
+
+
+                   // log.error("isSingleIf", isSingleIf);
 
                     if (headerId && isSingleIf) {
 
@@ -1895,7 +2018,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
                             headerRec.setValue('custrecord_jyswms_approved', true);
                             headerRec.setValue('custrecord_jyswmws_perform_update', true);
-                
+
                         }
                         headerRec.setValue('custrecord_jyswms_location_id', locationId);
 
@@ -2153,14 +2276,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         }
 
 
-                        log.error("track", track);
+                        //  log.error("track", track);
                         var trackLine = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_item', value: itemId });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_number', value: track.ssccCode });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_so_id', value: salesOrderId });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_qty', value: 1 });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_uniqueid', value: uniqueId });
-                        log.error("track.tracking number", track.trackingNumber)
+                        // log.error("track.tracking number", track.trackingNumber)
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_dropship', value: track.trackingNumber || " " });
                         headerRec.commitLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
                     });
@@ -2178,7 +2301,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     //  Calculate total picked quantity from all item lines
                     var totalPickedQty = pickQty;
                     var lineCount = headerRec.getLineCount({ sublistId: 'recmachcustrecord_sales_order_header' });
-                  
+
                     for (var l = 0; l < lineCount; l++) {
                         var linePicked = Number(headerRec.getSublistValue({
                             sublistId: 'recmachcustrecord_sales_order_header',
@@ -2194,14 +2317,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     //  Compare totals and set Approved checkbox
                     var isApproved = (totalSOQty <= totalPickedQty);
-                    var singleIf =  headerRec.getValue({ fieldId: 'custrecord_jywms_single_if_from_customer' });
-                  
-                  if(singleIf) {
-                    headerRec.setValue({
-                        fieldId: 'custrecord_jyswms_approved',
-                        value: isApproved ? true : false
-                    });
-                  }
+                    var singleIf = headerRec.getValue({ fieldId: 'custrecord_jywms_single_if_from_customer' });
+
+                    if (singleIf) {
+                        headerRec.setValue({
+                            fieldId: 'custrecord_jyswms_approved',
+                            value: isApproved ? true : false
+                        });
+                    }
 
                     log.error('Header Totals and Approval', {
                         totalSOQty: totalSOQty,
@@ -2559,7 +2682,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             });
 
             var ScriptEndTime = new Date().getTime();
-           // log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
+            // log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
 
 
 
