@@ -300,14 +300,14 @@ fullRecord.setValue({
                         });
                     }
 
-                    log.audit('Processing SO -- tracking numbers', {
-                        salesOrderId: salesOrderId,
-                        itemId: itemId,
-                        binId: binId,
-                        locationId: locationId,
-                        pickQty: pickQty,
-                        trackingNumbers:trackingNumbers
-                    });
+                    // log.audit('Processing SO -- tracking numbers', {
+                    //     salesOrderId: salesOrderId,
+                    //     itemId: itemId,
+                    //     binId: binId,
+                    //     locationId: locationId,
+                    //     pickQty: pickQty,
+                    //     trackingNumbers:trackingNumbers
+                    // });
 
                     // fallback lookup location if missing
                     if (!locationId && binId) {
@@ -354,7 +354,7 @@ fullRecord.setValue({
                     headerId = existingMap[salesOrderId];
                     var headerRec;
 
-log.error("headerId",headerId);
+log.debug("headerId",headerId);
                     if (headerId) {
                         headerRec = record.load({
                             type: 'customrecord_order_fulfillment_details',
@@ -372,12 +372,12 @@ log.error("headerId",headerId);
                         // Save new record first to get the ID before adding lines
                         headerId = headerRec.save();
                         existingMap[salesOrderId] = headerId;
-                        log.error("Created new header record", headerId);
+                       // log.error("Created new header record", headerId);
                     }
 
                     // STEP 4: Create Bin Transfer
                     if (savedId) {
-                        log.error("savedId -- bintrnasferid", savedId);
+                        log.debug("savedId -- bintrnasferid", savedId);
                     } else {
 
                         try {
@@ -597,7 +597,7 @@ log.error("headerId",headerId);
                                 ignoreMandatoryFields: true
                             });
 
-                            log.error(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
+                            log.debug(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
                         }
                     } catch (negativeInvError) {
                         log.error(" Negative Inventory Adjustment Error", {
@@ -655,7 +655,7 @@ log.error("headerId",headerId);
                         }
 
 
-                        log.error("track", track);
+                        log.debug("track", track);
                         var trackLine = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_item', value: itemId });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_number', value: track.ssccCode });
@@ -700,7 +700,7 @@ log.error("headerId",headerId);
                         value: isApproved ? true : false
                     });
 
-                    log.error('Header Totals and Approval', {
+                    log.debug('Header Totals and Approval', {
                         totalSOQty: totalSOQty,
                         totalPickedQty: totalPickedQty,
                         approved: isApproved
@@ -709,7 +709,7 @@ log.error("headerId",headerId);
                     // Save header record with error handling
                     try {
                         headerId = headerRec.save();
-                        // log.error("Saved Header", headerId);
+                        // log.debug("Saved Header", headerId);
                         existingMap[salesOrderId] = headerId;
 
                         // Add to response arrays for each sales order

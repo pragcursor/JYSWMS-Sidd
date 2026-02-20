@@ -15,13 +15,30 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
             var isApproved = newRec.getValue({ fieldId: 'custrecord_jyswms_approved' });
             var itemFulfill = newRec.getValue({ fieldId: 'custrecord_jyswms_rel_item_ful' });
+            var isPackagesUpdated = newRec.getValue({ fieldId: 'custrecord_jyswms_package_updated' });
+          
             var salesOrderId = newRec.getValue({ fieldId: 'custrecord_jyswms_sales_order_id' });
             var headerPickedQty = newRec.getValue({ fieldId: 'custrecord_jyswms_total_pick_qty' });
             var totalSoQuantity = newRec.getValue({ fieldId: 'custrecord_jyswms_total_so_qty' });
             var fulfillPartilly = newRec.getValue({ fieldId: 'custrecord_jyswms_is_partially_fulfilled' });
             var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' }) || "";
             var lineLineLocation = locationId;
-            var singleIf = newRec.getValue({ fieldId: 'custrecord_jywms_single_if_from_customer' });
+            var singleIf = issingleif(recordId, salesOrderId)
+
+
+          if (headerPickedQty == 0 && !isPackagesUpdated) {
+
+             record.submitFields({
+                    type: 'customrecord_order_fulfillment_details',
+                    id: recordId,
+                    values: {
+                        custrecord_jyswms_total_pick_qty: totalSoQuantity
+                    }
+                });
+            
+          }
+
+
              var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
 
             if (itemFulfill) {
@@ -376,6 +393,45 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             log.error('afterSubmit error', e.message);
         }
     }
+
+     function issingleif(headerId, salesOrderId) {
+            let isSingleIf = false;
+            if (headerId) {
+
+                const salesorderSearchObj = search.create({
+                    type: "salesorder",
+                    filters: [
+                        ["type", "anyof", "SalesOrd"],
+                        "AND",
+                        ["internalid", "anyof", salesOrderId],
+                        "AND",
+                        ["mainline", "is", "T"]
+                    ],
+                    columns: [
+                        search.createColumn({
+                            name: "custentity_single_if",
+                            join: "customer"
+                        })
+                    ]
+                });
+
+                salesorderSearchObj.run().each(function (result) {
+
+                    var singleIFValue = result.getValue({
+                        name: "custentity_single_if",
+                        join: "customer"
+                    });
+
+                    isSingleIf = singleIFValue === true || singleIFValue === 'T';
+
+                    return false; // Only one result expected
+                });
+
+
+              
+            }
+            return isSingleIf;
+        }
 
     function FullFillOrders(jsonData, customRecId, itemIdsInOrder) {
         var results = {};

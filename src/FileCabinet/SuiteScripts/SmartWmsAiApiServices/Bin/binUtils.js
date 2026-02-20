@@ -227,7 +227,19 @@ log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + current
 
 
             adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-            adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName || '' });
+         //   adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername',value: pickerName+ " via Portal-"+data.portalId|| '' });
+
+          var finalPickerName = '';
+
+if (pickerName || data.portalId) {
+    finalPickerName = (pickerName || '') +
+        (data.portalId ? ' via Portal-' + data.portalId : '');
+}
+
+adjustmentRecord.setValue({
+    fieldId: 'custbody_wms_ai_pickername',
+    value: finalPickerName
+});
 
             adjustmentsToMake.forEach(function (adjustment) {
                 try {
@@ -602,8 +614,20 @@ log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + current
 
 
             adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-            adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName || '' });
-           
+           // adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName+ " via Portal - "+data.portalId|| '' });
+
+          var finalPickerName = '';
+
+if (pickerName || data.portalId) {
+    finalPickerName = (pickerName || '') +
+        (data.portalId ? ' via Portal-' + data.portalId : '');
+}
+
+adjustmentRecord.setValue({
+    fieldId: 'custbody_wms_ai_pickername',
+    value: finalPickerName
+});
+
           adjustmentsToMake.forEach(function (adjustment) {
               try {
 
@@ -912,8 +936,20 @@ try{
 
 
             adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-            adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName || '' });
-           
+           // adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: value: pickerName+ " via Portal-"+data.portalId|| '' });
+
+              var finalPickerName = '';
+
+if (pickerName || data.portalId) {
+    finalPickerName = (pickerName || '') +
+        (data.portalId ? ' via Portal-' + data.portalId : '');
+}
+
+adjustmentRecord.setValue({
+    fieldId: 'custbody_wms_ai_pickername',
+    value: finalPickerName
+});
+
 			 
 			 
 			
@@ -1028,10 +1064,11 @@ try{
                 fieldId: 'custbody_wms_ai_created_by',
                 value: true
             });
+
+          
             binTransfer.setValue({
                 fieldId: 'custbody_wms_ai_pickername',
-                value: pickerName || ''
-            });
+               value: pickerName || '' });
 
 
             var locationID = binTransfer.getValue('location');

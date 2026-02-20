@@ -143,13 +143,13 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                             model: label.model
                         };
                     });
-                    log.error('Processing SO', {
-                        salesOrderId: salesOrderId,
-                        itemId: itemId,
-                        binId: binId,
-                        locationId: locationId,
-                        pickQty: pickQty
-                    });
+                    // log.error('Processing SO', {
+                    //     salesOrderId: salesOrderId,
+                    //     itemId: itemId,
+                    //     binId: binId,
+                    //     locationId: locationId,
+                    //     pickQty: pickQty
+                    // });
     
                     // fallback lookup location if missing
                     if (!locationId && binId) {
@@ -196,7 +196,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                         // Save new record first to get the ID before adding lines
                         headerId = headerRec.save();
                         existingMap[salesOrderId] = headerId;
-                        log.error("Created new header record", headerId);
+                        //log.error("Created new header record", headerId);
                     }
     
                     // STEP 4: Create Bin Transfer
@@ -225,13 +225,13 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
     
                     binTransferRec.commitLine({ sublistId: 'inventory' });
     
-                    log.error('BinTransfer Record - Before Save', {
-                        salesOrderId: salesOrderId,
-                        itemId: itemId,
-                        pickQty: pickQty,
-                        fromBin: binId,
-                        toBin: bulkStageBin
-                    });
+                    // log.error('BinTransfer Record - Before Save', {
+                    //     salesOrderId: salesOrderId,
+                    //     itemId: itemId,
+                    //     pickQty: pickQty,
+                    //     fromBin: binId,
+                    //     toBin: bulkStageBin
+                    // });
     
                     // Save bin transfer with error handling
                     var savedId;
@@ -279,12 +279,12 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                         // Calculate quantity difference
                         var qtyDiff = soItemQuantity - userPickedQty;
                         if (qtyDiff <= 0) {
-                            log.error("✅ No adjustment needed — fully picked");
+                            log.debug("✅ No adjustment needed — fully picked");
                             // Continue processing without adjustment
                         } else {
                             // Create inventory adjustment if there's a shortfall
                             var negativeQty = -qtyDiff;
-                           // log.error("🧾 Negative inventory adjustment started");
+                           // log.debug("🧾 Negative inventory adjustment started");
 
                             var inventoryAdjRec = record.create({
                                 type: record.Type.INVENTORY_ADJUSTMENT,
@@ -357,7 +357,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                                     for (var k = existingLines - 1; k >= 0; k--) {
                                         invDetail.removeLine({ sublistId: 'inventoryassignment', line: k });
                                     }
-                                    log.error(" Cleared Existing Inventory Lines", existingLines);
+                                    log.debug(" Cleared Existing Inventory Lines", existingLines);
 
                                     // 🔹 Step 2: Add new inventory assignment
                                     invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
@@ -383,13 +383,13 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                                         fieldId: 'quantity'
                                     });
 
-                                    log.error("📦 Inventory Assignment Details", {
+                                    log.debug("📦 Inventory Assignment Details", {
                                         binId: getBinID,
                                         quantity: getQty
                                     });
 
                                     invDetail.commitLine({ sublistId: 'inventoryassignment' });
-                                    log.error(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
+                                    log.debug(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
 
                                 } catch (invDetailError) {
                                     log.error("❌ Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
@@ -415,7 +415,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                                 ignoreMandatoryFields: true
                             });
 
-                            log.error("✅ Inventory Adjustment Created Successfully", invAdjId);
+                            log.debug("✅ Inventory Adjustment Created Successfully", invAdjId);
                         }
                     } catch (negativeInvError) {
                         log.error("❌ Negative Inventory Adjustment Error", {
@@ -493,7 +493,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                         value: isApproved ? true : false
                     });
     
-                    log.error('Header Totals and Approval', {
+                    log.debug('Header Totals and Approval', {
                         totalSOQty: totalSOQty,
                         totalPickedQty: totalPickedQty,
                         approved: isApproved
@@ -502,7 +502,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                     // Save header record with error handling
                     try {
                         headerId = headerRec.save();
-                       // log.error("Saved Header", headerId);
+                       // log.debug("Saved Header", headerId);
                         existingMap[salesOrderId] = headerId;
                         
                         // Add to response arrays for each sales order
@@ -519,8 +519,8 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                     }
                 }
                 
-                log.error("savedTransfers", savedTransfers);
-                log.error("savedHeaders", savedHeaders);
+                log.debug("savedTransfers", savedTransfers);
+                log.debug("savedHeaders", savedHeaders);
             }
             const endTime = new Date().getTime();
     
@@ -533,7 +533,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
             };
             
             // Log the expected JSON response
-            log.error('Expected JSON Response', JSON.stringify(expectedResponse));
+            log.debug('Expected JSON Response', JSON.stringify(expectedResponse));
     
             return expectedResponse;
     

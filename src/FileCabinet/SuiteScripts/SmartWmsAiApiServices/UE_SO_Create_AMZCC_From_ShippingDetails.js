@@ -15,13 +15,37 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             var newRecord = context.newRecord;
             var salesOrderId = newRecord.id;
 
+
+            var customerId = newRecord.getValue({ fieldId: 'entity' });
+            if (!customerId) {
+                return;
+            }
+
+            //  CUSTOMER-LEVEL KILL SWITCH
+            var customerLookup = search.lookupFields({
+                type: search.Type.CUSTOMER,
+                id: customerId,
+                columns: ['custentity_jyswms_enable']
+            });
+
+            if (
+                customerLookup.custentity_jyswms_enable === true ||
+                customerLookup.custentity_jyswms_enable === 'T'
+            ) {
+                log.audit(
+                    'Script Skipped',
+                    'Customer-level checkbox enabled. SO ID: ' + newRecord.id
+                );
+                return;
+            }
+
             // 1. Check checkbox
             var isCreateAmz = newRecord.getValue({
                 fieldId: 'custbody_jy_prag_creat_amzc_frm_ns_lin'
             });
 
             if (!isCreateAmz) {
-               // log.debug('Skipped', 'Checkbox not checked');
+                // log.debug('Skipped', 'Checkbox not checked');
                 return;
             }
 
@@ -31,7 +55,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             });
 
             if (!shippingHeaderId) {
-              //  log.debug('Missing Header', 'custbody_shipping_details_header is empty');
+                //  log.debug('Missing Header', 'custbody_shipping_details_header is empty');
                 return;
             }
 
@@ -53,7 +77,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             });
 
             var resultCount = shippingSearch.runPaged().count;
-           // log.debug('Shipping Search Count', resultCount);
+            // log.debug('Shipping Search Count', resultCount);
 
             shippingSearch.run().each(function (result) {
 
@@ -72,12 +96,12 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             });
 
             if (!trackingObj.length) {
-               // log.debug('No Data', 'No shipping detail records found');
+                // log.debug('No Data', 'No shipping detail records found');
                 return;
             }
 
             // 4. Load Sales Order
-          //  log.debug("salesOrderId", salesOrderId);
+            //  log.debug("salesOrderId", salesOrderId);
 
             var salesOrderRec = record.load({
                 type: record.Type.SALES_ORDER,

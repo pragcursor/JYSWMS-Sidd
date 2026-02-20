@@ -2,121 +2,168 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/orderUtils.js', './JYSWMS_generateToken_API.js'], (record, search, log, runtime, https, autoLocUtil, tokenModule) => {
+define([
+    'N/record',
+    'N/search',
+    'N/log',
+    'N/runtime',
+    'N/https',
+    './Orders/orderUtils.js',
+    './JYSWMS_generateToken_API.js'
+], (record, search, log, runtime, https, autoLocUtil, tokenModule) => {
 
-    const LOC_HARDEE = '15';     // L60-Hardeeville_SC
-    const LOC_FLEMINGTON = '9';  // Flemington L41
+    const LOC_HARDEE = '15';
+    const LOC_FLEMINGTON = '9';
+    const LOCATIONS = ['9', '15'];
 
+    const REASON_NA = 1;
+    const REASON_BULK = 2;
+    const REASON_RECEIVING = 3;
+    const REASON_BOTH = 4;
+    const REASON_OTHER_LOCATION = 5;
+
+    // =========================================================
+    // SEND DATA FUNCTION (FIXED SCOPE ISSUE)
+    // =========================================================
+    const sendData = (payload) => {
+
+        const token = tokenModule.generateToken();
+        if (!token) {
+            log.error('sendData', 'Token generation failed');
+            return;
+        }
+
+        try {
+            const response = https.post({
+                url: 'https://api.jyswms.com/update-dropship-lines?closed=false',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            return {
+                success: response.code === 200,
+                response: response.body || ''
+            };
+
+        } catch (e) {
+            log.error('sendData Error', e);
+            return { success: false, error: e.message };
+        }
+    };
+
+    // =========================================================
+    // AFTER SUBMIT
+    // =========================================================
     const afterSubmit = (context) => {
 
         if (![context.UserEventType.CREATE, context.UserEventType.EDIT].includes(context.type)) {
             return;
         }
+
         try {
 
-
             const newRec = context.newRecord;
-            const recordId = newRec.id;
-            const recordtype = newRec.type;
+            const soId = newRec.id;
+            const soType = newRec.type;
+            // if(soId != 62730674){
+            //     return;
+            // }
+            if (soType !== record.Type.SALES_ORDER) return;
 
             const autoLocEnabled = newRec.getValue('custbody_jyswms_enable_auto_loc_chng');
             const alreadyUpdated = newRec.getValue('custbody_jyswms_loc_updated');
-            const tranName = newRec.getValue('tranid');
             const status = newRec.getValue('status');
-            // const sta = newRec.getValue('status');
-            // log.debug('sta', sta);
-            if (status == 'Closed' || status == 'Cancelled' || status == 'Billed') {
-                log.debug('Scritp exists - status for order: ' + tranName + ' is ', status + ' -' + tranName + '-');
-                return;
-            }
-            if (recordtype === record.Type.SALES_ORDER) {
 
-                var customerId = newRec.getValue({ fieldId: 'entity' });
+            if (['Closed', 'Cancelled', 'Billed'].includes(status)) return;
+            if (!autoLocEnabled || alreadyUpdated) return;
 
-                if (customerId) {
-                    var customerLookup = search.lookupFields({
-                        type: search.Type.CUSTOMER,
-                        id: customerId,
-                        columns: ['custentity_jyswms_enable']
-                    });
+            const customerId = newRec.getValue({ fieldId: 'entity' });
+            if (!customerId) return;
 
-                    if (customerLookup.custentity_jyswms_enable === false || customerLookup.custentity_jyswms_enable === 'F') {
-                        // log.audit(
-                        //     'Sales Order Approval Skipped',
-                        //     'JYS-NOT Enbled | SO ID: ' + recordId
-                        // );
-                        return;
-                    }
-                    log.audit(
-                        'Sales Order Approval Enabled',
-                        'JYS-Enabled | SO ID: ' + recordId
-                    );
-                }
-            }
+            const customerLookup = search.lookupFields({
+                type: search.Type.CUSTOMER,
+                id: customerId,
+                columns: ['custentity_jyswms_enable', 'custentity_single_if']
+            });
 
-            // HARD EXIT – prevents reload & infinite loop
-            if (!autoLocEnabled || alreadyUpdated) {
-                log.debug('script exists - autoLoc || alreadyUpdated ', 'autoLocEnabled: ' + autoLocEnabled + ' - alreadyUpdated: ' + alreadyUpdated);
-                return;
-            }
+            const isJysEnabled =
+                customerLookup.custentity_jyswms_enable === true ||
+                customerLookup.custentity_jyswms_enable === 'T';
 
-            const soId = newRec.id;
-            const soType = newRec.type;
-            //log.debug('SO Auto Location Change', `Processing SO ID: ${soId}`);
-            // Load record ONCE
+            const isSingleIFCustomer =
+                customerLookup.custentity_single_if === true ||
+                customerLookup.custentity_single_if === 'T';
+
+            if (!isJysEnabled) return;
+
             const so = record.load({
                 type: soType,
                 id: soId,
                 isDynamic: false
             });
 
-            var so_status = so.getValue({ fieldId: 'status' });
-            if (so_status == 'Closed' || so_status == 'Cancelled' || so_status == 'Billed') {
-                log.error('2nd entry point restricted - status for order: ' + soId + ' is ', so_status)
-                return;
-            }
-
             const lineCount = so.getLineCount({ sublistId: 'item' });
             if (!lineCount) return;
 
+            // 🔥 BLOCK: Single IF + Multi Line
+            if (isSingleIFCustomer && lineCount > 1) {
+                log.error('Single IF Customer', 'Single IF customer with multiple lines. Marking as updated without changes.');
+                // record.submitFields({
+                //     type: soType,
+                //     id: soId,
+                //     values: { custbody_jyswms_loc_updated: true },
+                //     options: { enableSourcing: false, ignoreMandatoryFields: true }
+                // });
+
+                return;
+            }
             const itemSet = new Set();
 
-            // Collect inventory items only
             for (let i = 0; i < lineCount; i++) {
+
                 const itemType = so.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'itemtype',
                     line: i
                 });
-                const quantity = parseFloat(so.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'quantity',
-                    line: i
-                })) || 0;
-                const pickedQtyRaw = so.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'custcol_jyswms_picked_qty',
-                    line: i
-                });
-                const pickedQty = Number(pickedQtyRaw) || 0;
-                if (itemType === 'InvtPart' && ((pickedQty <= 0) || (pickedQty < quantity))) {
+
+                if (itemType !== 'InvtPart') continue;
+
+                const quantity = parseFloat(
+                    so.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantity',
+                        line: i
+                    })
+                ) || 0;
+
+                const pickedQty = Number(
+                    so.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jyswms_picked_qty',
+                        line: i
+                    })
+                ) || 0;
+
+                if (pickedQty <= 0 || pickedQty < quantity) {
+
                     const itemId = so.getSublistValue({
-                        sublistId: 'item', fieldId: 'item', line: i
+                        sublistId: 'item',
+                        fieldId: 'item',
+                        line: i
                     });
-                    log.debug('ispicked - for order :' + soId + ' ', 'item: ' + itemId + 'pickedqty = ' + pickedQty);
 
                     if (itemId) itemSet.add(itemId);
                 }
             }
 
-
-            //  log.debug('lineCount', lineCount);
-            if (!itemSet.size) return;
-            // log.debug('itemSet.size', itemSet.size);
-            log.error('itemSet', [...itemSet]);
-
-
-            // Inventory availability map: { itemId: { locationId: availableQty } }
+            if (!itemSet.size) {
+                markComplete(soType, soId);
+                return;
+            }
 
             const inventoryMap = {};
 
@@ -140,22 +187,13 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                 const locId = result.getValue('location');
                 const qty = parseFloat(result.getValue('available')) || 0;
 
-                if (!inventoryMap[itemId]) {
-                    inventoryMap[itemId] = {};
-                }
-
-                if (!inventoryMap[itemId][locId]) {
-                    inventoryMap[itemId][locId] = 0;
-                }
+                if (!inventoryMap[itemId]) inventoryMap[itemId] = {};
+                if (!inventoryMap[itemId][locId]) inventoryMap[itemId][locId] = 0;
 
                 inventoryMap[itemId][locId] += qty;
 
                 return true;
             });
-
-            // log.error('Inventory Map', JSON.stringify(inventoryMap));
-
-
 
             let anyLineUpdated = false;
             let newHeaderLocation = null;
@@ -168,7 +206,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                     fieldId: 'itemtype',
                     line: i
                 });
-                //  log.debug('itemType', itemType);
+
                 if (itemType !== 'InvtPart') continue;
 
                 const itemId = so.getSublistValue({
@@ -176,7 +214,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                     fieldId: 'item',
                     line: i
                 });
-                //  log.debug('inventoryMap[itemId]', inventoryMap[itemId]);
+
                 if (!inventoryMap[itemId]) continue;
 
                 const qtyRequired = parseFloat(
@@ -193,99 +231,82 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                     line: i
                 });
 
-                // Inventory exists at current location
                 if (
                     inventoryMap[itemId][currentLoc] &&
                     inventoryMap[itemId][currentLoc] >= qtyRequired
-                ) {
-                    continue;
-                }
+                ) continue;
 
                 const alternateLoc =
                     currentLoc === LOC_HARDEE ? LOC_FLEMINGTON : LOC_HARDEE;
-
-                //  log.debug('alternateLoc', alternateLoc);
-                //  log.debug(itemId, 'qtyRequired=' + qtyRequired + ',currentLoc' + inventoryMap[itemId][currentLoc] + ', Alternate=' + inventoryMap[itemId][alternateLoc])
 
                 if (
                     inventoryMap[itemId][alternateLoc] &&
                     inventoryMap[itemId][alternateLoc] >= qtyRequired
                 ) {
-                    // log.debug('inventoryMap[itemId][alternateLoc] >= qtyRequired', inventoryMap[itemId][alternateLoc] >= qtyRequired);
+
                     so.setSublistValue({
                         sublistId: 'item',
                         fieldId: 'location',
                         line: i,
                         value: alternateLoc
                     });
+
                     so.setSublistValue({
                         sublistId: 'item',
                         fieldId: 'custcol_jyswms_line_location',
                         line: i,
                         value: alternateLoc
                     });
+
                     so.setSublistValue({
                         sublistId: 'item',
                         fieldId: 'custcol_jyswms_issue',
                         line: i,
                         value: ''
                     });
+
                     anyLineUpdated = true;
-                    // collect ONLY item IDs
                     updatedItemIds.add(itemId);
-                    // Track header location ONLY if single-line SO
+
                     if (lineCount === 1) {
                         newHeaderLocation = alternateLoc;
                     }
                 }
-
             }
-            // log.debug('updatedItemIds', updatedItemIds);
-            // Save only if changes were made
-            if (anyLineUpdated) {
-                if (lineCount === 1 && newHeaderLocation) {
-                    so.setValue({
-                        fieldId: 'location',
-                        value: newHeaderLocation
-                    });
 
+            if (anyLineUpdated) {
+
+                if (lineCount === 1 && newHeaderLocation) {
+                    so.setValue({ fieldId: 'location', value: newHeaderLocation });
                 }
+
                 so.setValue({
                     fieldId: 'custbody_jyswms_loc_updated',
                     value: true
                 });
-                log.audit('SO Auto Location Change', `Saving SO ID: ${soId} with location changes.`);
+
                 so.save({
                     enableSourcing: false,
                     ignoreMandatoryFields: true
                 });
-            } else {
-                var submit = record.submitFields({
-                    type: soType,
-                    id: soId,
-                    values: {
-                        custbody_jyswms_loc_updated: true
-                    },
-                    options: {
-                        enableSourcing: false,
-                        ignoreMandatoryFields: true
-                    }
-                });
-            }
+                log.audit('Auto Location Change', `Updated SO ${soId} with new locations for items: ${Array.from(updatedItemIds).join(', ')}`);
 
-            let responseJson = null;
+            } else {
+                markComplete(soType, soId);
+            }
 
             if (updatedItemIds.size) {
+
                 const payload = {
                     salesOrderHeaderId: soId,
-                    salesOrderItemId: Array.from(updatedItemIds) // ['123','456']
+                    salesOrderItemId: Array.from(updatedItemIds)
                 };
 
-                responseJson = autoLocUtil.getOrdersDUP(payload);
-                //  log.audit('Util Response', JSON.stringify(responseJson));
-            }
-            if (responseJson && responseJson.length > 0) {
-                var send = sendData(responseJson)
+                const responseJson = autoLocUtil.getOrdersDUP(payload);
+
+                if (responseJson && responseJson.length > 0) {
+                    sendData(responseJson);
+                }
             }
 
         } catch (error) {
@@ -293,47 +314,19 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
         }
     };
 
+    const markComplete = (type, id) => {
+        record.submitFields({
+            type: type,
+            id: id,
+            values: { custbody_jyswms_loc_updated: true },
+            options: { enableSourcing: false, ignoreMandatoryFields: true }
+        });
+    };
 
-
-    /** Sends data to external API using parameters */
-    function sendData(recId) {
-        const token = tokenModule.generateToken();
-        if (!token) {
-            return;
-        }
-
-        try {
-            const response = https.post({
-                url: 'https://api.jyswms.com/update-dropship-lines?closed=' + false,
-                headers: {
-                    'Authorization': 'Bearer ' + token,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(recId)
-            });
-
-            // log.debug('sendData Response', JSON.stringify(response));
-            return {
-                success: response.code === 200,
-                response: response.body || ''
-            };
-
-        } catch (e) {
-            log.error('sendData Error', e);
-            return { success: false, error: e.message };
-        }
-    }
-
-
-    const REASON_NA = 1;
-    const REASON_BULK = 2;
-    const REASON_RECEIVING = 3;
-    const REASON_BOTH = 4;
-    const REASON_OTHER_LOCATION = 5; // Inv in Another Location
-
-    const LOCATIONS = ['9', '15']; // L41 & L60
-
-    function beforeSubmit(context) {
+    // =========================================================
+    // BEFORE SUBMIT
+    // =========================================================
+    const beforeSubmit = (context) => {
 
         if (![context.UserEventType.CREATE, context.UserEventType.EDIT].includes(context.type)) {
             return;
@@ -350,7 +343,6 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
 
             const itemSet = new Set();
 
-            // Collect open items
             for (let i = 0; i < lineCount; i++) {
 
                 const itemId = soRec.getSublistValue({
@@ -359,17 +351,21 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                     line: i
                 });
 
-                const quantity = parseFloat(soRec.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'quantity',
-                    line: i
-                })) || 0;
+                const quantity = parseFloat(
+                    soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantity',
+                        line: i
+                    })
+                ) || 0;
 
-                const fulfilledQty = parseFloat(soRec.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'quantityfulfilled',
-                    line: i
-                })) || 0;
+                const fulfilledQty = parseFloat(
+                    soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantityfulfilled',
+                        line: i
+                    })
+                ) || 0;
 
                 if (itemId && fulfilledQty < quantity) {
                     itemSet.add(itemId);
@@ -378,13 +374,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
 
             if (!itemSet.size) return;
 
-            // ======================================
-            // Inventory Search (Both Locations)
-            // ======================================
-
             const availabilityMap = {};
-            // STRUCTURE:
-            // availabilityMap[itemId][locationId] = [{bin, available}]
 
             search.create({
                 type: 'inventorybalance',
@@ -397,12 +387,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                     'AND',
                     ['binnumber.inactive', 'is', 'F']
                 ],
-                columns: [
-                    'item',
-                    'location',
-                    'available',
-                    'binnumber'
-                ]
+                columns: ['item', 'location', 'available', 'binnumber']
             }).run().each(result => {
 
                 const item = result.getValue('item');
@@ -410,13 +395,8 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                 const available = parseFloat(result.getValue('available')) || 0;
                 const binText = result.getText('binnumber') || '';
 
-                if (!availabilityMap[item]) {
-                    availabilityMap[item] = {};
-                }
-
-                if (!availabilityMap[item][location]) {
-                    availabilityMap[item][location] = [];
-                }
+                if (!availabilityMap[item]) availabilityMap[item] = {};
+                if (!availabilityMap[item][location]) availabilityMap[item][location] = [];
 
                 availabilityMap[item][location].push({
                     bin: binText,
@@ -425,10 +405,6 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
 
                 return true;
             });
-
-            // ======================================
-            // Evaluate Each Line
-            // ======================================
 
             for (let i = 0; i < lineCount; i++) {
 
@@ -444,34 +420,37 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                     line: i
                 });
 
-                const quantity = parseFloat(soRec.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'quantity',
-                    line: i
-                })) || 0;
+                const quantity = parseFloat(
+                    soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantity',
+                        line: i
+                    })
+                ) || 0;
 
-                const pickedQty = parseFloat(soRec.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'quantitypicked',
-                    line: i
-                })) || 0;
+                const pickedQty = parseFloat(
+                    soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantitypicked',
+                        line: i
+                    })
+                ) || 0;
 
-                const fulfilledQty = parseFloat(soRec.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'quantityfulfilled',
-                    line: i
-                })) || 0;
+                const fulfilledQty = parseFloat(
+                    soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantityfulfilled',
+                        line: i
+                    })
+                ) || 0;
 
                 let reasonId = '';
 
                 if (fulfilledQty >= quantity || pickedQty > 0) {
-
                     reasonId = '';
-
                 } else if (itemId && lineLocation) {
 
                     const itemData = availabilityMap[itemId] || {};
-
                     const currentLocBins = itemData[lineLocation] || [];
                     const otherLocation = LOCATIONS.find(loc => loc !== lineLocation);
                     const otherLocBins = itemData[otherLocation] || [];
@@ -479,13 +458,10 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
                     const currentHasInventory = hasInventory(currentLocBins);
                     const otherHasInventory = hasInventory(otherLocBins);
 
-                    // 🔥 RULE: Inventory only in other location
                     if (!currentHasInventory && otherHasInventory) {
                         reasonId = REASON_OTHER_LOCATION;
-
                     } else if (!currentHasInventory && !otherHasInventory) {
                         reasonId = REASON_NA;
-
                     } else {
                         reasonId = determineBinReason(currentLocBins);
                     }
@@ -502,15 +478,12 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
         } catch (e) {
             log.error('Inventory Script Error', e);
         }
-    }
+    };
 
-    // =============================
+    const hasInventory = (binData) =>
+        binData.some(b => (b.available || 0) > 0);
 
-    function hasInventory(binData) {
-        return binData.some(b => (b.available || 0) > 0);
-    }
-
-    function determineBinReason(binData) {
+    const determineBinReason = (binData) => {
 
         if (!binData || !binData.length) return REASON_NA;
 
@@ -532,14 +505,13 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https', './Orders/order
         });
 
         if (hasOther) return '';
-
         if (hasBulk && hasReceiving) return REASON_BOTH;
         if (hasBulk) return REASON_BULK;
         if (hasReceiving) return REASON_RECEIVING;
 
         return REASON_NA;
-    }
-
+    };
 
     return { afterSubmit, beforeSubmit };
+
 });

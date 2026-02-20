@@ -48,7 +48,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var canadaCustomerId = (locationLookup.entity && locationLookup.entity.length)
                 ? locationLookup.entity[0].value
                 : null;
-            log.error("CustomerId", canadaCustomerId);
+           
 
 
 

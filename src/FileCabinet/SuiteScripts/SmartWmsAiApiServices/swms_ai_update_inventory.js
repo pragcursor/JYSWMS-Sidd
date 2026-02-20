@@ -15,7 +15,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                 let itemIds = [];
                 let recId, recType, rec;
 
-                if (context.type === context.UserEventType.DELETE) {
+               if (context.type === context.UserEventType.DELETE) {
 
                     recId = context.oldRecord.id;
                     recType = context.oldRecord.type;
@@ -25,7 +25,14 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
 
                     if (ITEM_TYPES.includes(recType)) {
                         itemIds.push(recId.toString());
-                    } else {
+                    } 
+                  else if (recType == 'itemreceipt'){
+                    
+                    log.error("itemreceipt - (Delete)", { recId, recType });
+                      itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
+                    
+                    }
+                    else {
                         itemIds = collectItemIdsFromSublist(recId, recType, 'inventory', 'item', rec);
                     }
 
@@ -34,7 +41,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                     recType = context.newRecord.type || "";
                     rec = context.newRecord;
 
-                    // log.debug("Record Info (CREATE/EDIT)", { recId, recType });
+                    // //log.debug("Record Info (CREATE/EDIT)", { recId, recType });
 
                     if (ITEM_TYPES.includes(recType)) {
                         let oldRec = context.oldRecord;
@@ -46,23 +53,28 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                         let newL60 = newRec.getValue({ fieldId: 'custitem_l60_inventory_on_hand' });
 
                         if (oldL41 !== newL41 || oldL60 !== newL60) {
-                            log.error("Record Info (CREATE/EDIT)", { recId, recType });
-                            //log.debug("Inventory Changed", { recId });
+                            ////log.debug("Inventory Changed", { recId });
                             itemIds.push(recId.toString());
                         }
                         return;
-                    } else {
-                        log.debug("Record Info (CREATE/EDIT)", { recId, recType });
+                    } 
+                    
+                   else if (recType === 'itemreceipt'){
+                       log.error("itemreceipt - (CREATE/EDIT)", { recId, recType });
+                      itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
+
+                    }
+                    else {
                         itemIds = collectItemIdsFromSublist(recId, recType, 'inventory', 'item', rec);
                     }
                 }
 
                 // Final processing
                 if (itemIds.length) {
-                    //log.debug("Record Info (CREATE/EDIT)", { recId, recType });
+                    ////log.debug("Record Info (CREATE/EDIT)", { recId, recType });
                     processInventory(itemIds);
                 } else {
-                    log.debug("No Item IDs Found", { recId, recType });
+                    //log.debug("No Item IDs Found", { recId, recType });
                 }
 
             } catch (e) {
@@ -97,13 +109,13 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
         /** Fetches inventory & sends it to API */
         function processInventory(itemIds) {
             const params = { itemIds };
-            //  log.debug("Inventory Params", params);
+            //  //log.debug("Inventory Params", params);
 
             const inventoryData = inventoryUtils.getInventory(params, 1000, 0);
-            //  log.debug("Inventory Data", inventoryData);
+            //  //log.debug("Inventory Data", inventoryData);
 
             const apiStatus = sendData(inventoryData);
-            log.debug("API Response", apiStatus);
+            //log.debug("API Response", apiStatus);
         }
 
         /** Authenticates & returns access token */
@@ -134,13 +146,13 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
         /** Sends data to external API */
         function sendData(body) {
             const token = generateToken();
-            // log.debug("token generared",token);
+            // //log.debug("token generared",token);
             if (!token) {
                 return { success: false, error: "Token generation failed" };
             }
 
             try {
-                //  log.debug("Body",JSON.stringify(body));
+                //  //log.debug("Body",JSON.stringify(body));
 
                 const response = https.post({
                     url: 'https://api.jyswms.com/netsuite/update-inventory',
@@ -189,7 +201,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
 
             var custom_status = rec.getValue({ fieldId: 'custbody_jyswms_rma_status' });
             if (custom_status) {
-                //log.debug("RMA Custom Status", custom_status);
+                ////log.debug("RMA Custom Status", custom_status);
                 var statusField = form.addField({
                     id: 'custpage_rma_status',
                     type: serverWidget.FieldType.INLINEHTML,

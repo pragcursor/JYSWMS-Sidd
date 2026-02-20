@@ -1788,7 +1788,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
 
 
-                    log.error("trackingNumbers", trackingNumbers);
+                    log.debug("trackingNumbers", trackingNumbers);
 
 
                     log.audit('Processing SO', {
@@ -1938,7 +1938,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                         headerId = headerRec.save();
 
-                        log.error("Created new header record", headerId);
+                       // log.error("Created new header record", headerId);
                     }
 
 

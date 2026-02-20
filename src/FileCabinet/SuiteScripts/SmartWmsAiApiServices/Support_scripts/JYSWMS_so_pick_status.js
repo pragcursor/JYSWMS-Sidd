@@ -17,104 +17,118 @@ define([
             return;
         }
 
+        var recId, recType;
+
         try {
+
             var newRecord = context.newRecord;
-            var recId = newRecord.id;
-            var recType = newRecord.type;
+            recId = newRecord.id;
+            recType = newRecord.type;
+
             var customerId = newRecord.getValue({ fieldId: 'entity' });
-            // if (recId !== 62395735) { // Test SO ID, remove this line in production
-            //     return;
-            // }
-            // log.debug('afterSubmit', 'Record Type: ' + recType + ', Record ID: ' + recId);
-            if (customerId === 476 || customerId === 1807) {
-                log.debug('Skipping JYS WMS Logic', 'Customer ID 476 or 1807 is excluded from JYS WMS processing');
-            } else if(customerId != 476 && customerId != 1807) {
-                var isJysWmsEnabled = search.lookupFields({
-                    type: record.Type.CUSTOMER,
-                    id: customerId,
-                    columns: ['custentity_jyswms_enable', 'entityid']
-                });
-                var isenabled = isJysWmsEnabled.custentity_jyswms_enable;
-                if (!isenabled) {
-                    return;
-                }
-                var customerName = isJysWmsEnabled.entityid;
-                // -----------------------------
-                // INDEPENDENT APPROVAL LOGIC
-                // -----------------------------
+            if (!customerId) return;
 
-                var approvalDone = newRecord.getValue('custbody_jyswms_approval_processed');
-                var orderStatus = newRecord.getValue('orderstatus'); // A = Pending Approval
-
-                if (
-                    isenabled &&
-                    !approvalDone &&
-                    orderStatus === 'A'
-                ) {
-                    record.submitFields({
-                        type: record.Type.SALES_ORDER,
-                        id: recId,
-                        values: {
-                            orderstatus: 'B', // Approved
-                           // custbody_wms_ready_to_ship: true,
-                            custbody_reason_approval: 'JYS WMS Auto Approval',
-                            custbody_jyswms_approval_processed: true
-                        },
-                        options: {
-                            enableSourcing: false,
-                            ignoreMandatoryFields: true
-                        }
-                    });
-
-                    log.audit(
-                        'Sales Order Approved - ('+ customerName +'):',
-                        'SO ID ' + recId
-                    );
-                }
-
-            }
-
-            var apiResult = sendData(recId);
-            if (!apiResult.success) {
-                log.error('API Call Failed', apiResult.error || 'Unknown error');
+            // Skip excluded customers
+            if (customerId == 476 || customerId == 1807) {
+                log.debug('Skipping JYS WMS Logic', 'Customer excluded: ' + customerId);
                 return;
             }
 
-            if (!apiResult.response) {
-                // log.error('API Error', 'Empty response');
+            // Lookup customer WMS flag
+            var customerLookup = search.lookupFields({
+                type: record.Type.CUSTOMER,
+                id: customerId,
+                columns: ['custentity_jyswms_enable', 'entityid']
+            });
+
+            var isEnabled = customerLookup.custentity_jyswms_enable;
+            if (!isEnabled) return;
+
+            var customerName = customerLookup.entityid;
+
+            // -----------------------------
+            // AUTO APPROVAL LOGIC
+            // -----------------------------
+
+            var approvalDone = newRecord.getValue('custbody_jyswms_approval_processed');
+            var orderStatus = newRecord.getValue('orderstatus'); // A = Pending Approval
+
+            if (!approvalDone && orderStatus === 'A' && (customerId !== 476 && customerId !== 1807)) {
+
+                record.submitFields({
+                    type: record.Type.SALES_ORDER,
+                    id: recId,
+                    values: {
+                        orderstatus: 'B',
+                        custbody_reason_approval: 'JYS WMS Auto Approval',
+                        custbody_jyswms_approval_processed: true
+                    },
+                    options: {
+                        enableSourcing: false,
+                        ignoreMandatoryFields: true
+                    }
+                });
+
+                log.audit(
+                    'Sales Order Auto Approved (' + customerName + ')',
+                    'SO ID ' + recId
+                );
+            }
+
+            // -----------------------------
+            // CALL EXTERNAL API
+            // -----------------------------
+
+            var apiResult = sendData(recId);
+
+            if (!apiResult || !apiResult.success || !apiResult.response) {
+                log.error('API Call Failed', apiResult ? apiResult.error : 'No response');
                 return;
             }
 
             var responseObj = JSON.parse(apiResult.response || '{}');
-           // log.debug('API Response for SO ID ' + recId, JSON.stringify(responseObj));
+
             var sourceArray = [];
+
             if (responseObj.completed && responseObj.completed.length > 0) {
                 sourceArray = responseObj.completed;
             } else if (responseObj.notcompleted && responseObj.notcompleted.length > 0) {
                 sourceArray = responseObj.notcompleted;
             }
-            //log.debug('Source Array', JSON.stringify(sourceArray));
-            if (sourceArray.length === 0) {
-                // log.debug('No Data for Record ID ' + recId, 'No completed or notcompleted records found');
-                return;
-            }
 
-            /** Build map: item => picked qty */
-            var pickedQtyMap = {};
+            if (!sourceArray || sourceArray.length === 0) return;
+            if (!sourceArray[0].data || sourceArray[0].data.length === 0) return;
+            
+            // -----------------------------
+            // BUILD PICKED MAP (lineuniquekey → qty)
+            // -----------------------------
+
+            var pickedMap = {};
 
             sourceArray[0].data.forEach(function (line) {
-                if (line.is_picked === 'picked') {
+
+                if (line.is_picked === 'picked' && line.unique_id) {
+
+                    // Remove suffix after underscore
+                    var cleanUniqueId = line.unique_id.split('_')[0];
+
                     var qty = parseFloat(line.quantity) || 0;
-                    pickedQtyMap[line.item] = (pickedQtyMap[line.item] || 0) + qty;
+
+                    if (qty > 0) {
+                        pickedMap[String(cleanUniqueId)] = qty;
+                    }
                 }
             });
-            //log.debug('Picked Qty Map', JSON.stringify(pickedQtyMap));
-            if (Object.keys(pickedQtyMap).length === 0) {
-               // log.debug('No Picked Items', 'No picked items found in API response');
+
+            if (Object.keys(pickedMap).length === 0) {
+               // log.debug('No picked lines returned from API');
                 return;
             }
 
-            /** Load Sales Order for update */
+            // -----------------------------
+            // LOAD SALES ORDER FOR UPDATE
+            // -----------------------------
+
             var soRec = record.load({
                 type: recType,
                 id: recId,
@@ -124,20 +138,30 @@ define([
             var lineCount = soRec.getLineCount({ sublistId: 'item' });
 
             for (var i = 0; i < lineCount; i++) {
-                var itemText = soRec.getSublistText({
+
+                var lineUniqueKey = soRec.getSublistValue({
                     sublistId: 'item',
-                    fieldId: 'item',
+                    fieldId: 'lineuniquekey',
                     line: i
                 });
 
-                if (pickedQtyMap[itemText] != null) {
-                    soRec.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'custcol_jyswms_picked_qty',
-                        line: i,
-                        value: Number(pickedQtyMap[itemText])
-                    });
-                }
+                if (!lineUniqueKey) continue;
+
+                if (!pickedMap[String(lineUniqueKey)]) continue;
+
+                var qtyToApply = pickedMap[String(lineUniqueKey)];
+
+                soRec.setSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'custcol_jyswms_picked_qty',
+                    line: i,
+                    value: qtyToApply
+                });
+
+                log.debug('Updated line',
+                    'LineUniqueKey: ' + lineUniqueKey +
+                    ' | Qty: ' + qtyToApply
+                );
             }
 
             soRec.save({
@@ -145,23 +169,28 @@ define([
                 ignoreMandatoryFields: true
             });
 
-           // log.debug('Success', 'Picked quantities updated successfully');
+            log.audit('Picked quantities updated (by unique id)', 'SO ID ' + recId);
 
         } catch (e) {
-            log.error('afterSubmit Error for Record ID ' + recId, e);
+
+            log.error('afterSubmit Error for SO ID ' + recId, e);
         }
     }
 
-    /** Sends data to external API using parameters */
-    function sendData(recId) {
-        const token = tokenModule.generateToken();
-        if (!token) {
-            return;
-        }
+    // -----------------------------
+    // SEND DATA TO JYS WMS API
+    // -----------------------------
 
+    function sendData(recId) {
 
         try {
-            const response = https.get({
+
+            var token = tokenModule.generateToken();
+            if (!token) {
+                return { success: false, error: 'Token generation failed' };
+            }
+
+            var response = https.get({
                 url: 'https://api.jyswms.com/dropship-sales-order-status?sales_order_id=' + recId,
                 headers: {
                     'Authorization': 'Bearer ' + token,
@@ -169,15 +198,19 @@ define([
                 }
             });
 
-
             return {
                 success: response.code === 200,
                 response: response.body || ''
             };
 
         } catch (e) {
+
             log.error('sendData Error', e.message);
-            return { success: false, error: e.message };
+
+            return {
+                success: false,
+                error: e.message
+            };
         }
     }
 
