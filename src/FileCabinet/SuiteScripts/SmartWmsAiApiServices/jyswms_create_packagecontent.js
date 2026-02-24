@@ -48,7 +48,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var canadaCustomerId = (locationLookup.entity && locationLookup.entity.length)
                 ? locationLookup.entity[0].value
                 : null;
-           
+
 
 
 
@@ -389,7 +389,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     custrecord_jyswms_related_cif: recordId,
                     custrecord_jyswms_createdfrom: true,
                     custrecordhj_pkg_trackingnumber: line.bolTrackingNumber || line.tracking,
-                    custrecordhj_pkg_desc: line.itemName + '/1'
+                    custrecordhj_pkg_desc: line.itemName + '/1',
+                    custrecord_jyswms_item_not_populated: true
                 };
 
                 Object.keys(fieldMap).forEach(function (fieldId) {

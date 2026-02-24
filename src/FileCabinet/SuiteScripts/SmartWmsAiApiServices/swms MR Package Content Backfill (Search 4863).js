@@ -4,13 +4,13 @@
  */
 define(['N/record', 'N/search', 'N/log'], (record, search, log) => {
 
-   
+
     const getInputData = () => {
         return {
             type: 'search',
-            id: '4863' 
+            id: '4863'
         };
-      
+
     };
 
     /**
@@ -21,7 +21,7 @@ define(['N/record', 'N/search', 'N/log'], (record, search, log) => {
         const searchResult = JSON.parse(context.value);
         const packageId = searchResult.id;
         // Fetch the Transaction ID from the search column
-       // const transactionId = searchResult.values.custrecord_hj_packagecontents_sublist.value;
+        // const transactionId = searchResult.values.custrecord_hj_packagecontents_sublist.value;
 
         if (packageId) {
             context.write({
@@ -36,11 +36,11 @@ define(['N/record', 'N/search', 'N/log'], (record, search, log) => {
      * It loads the Fulfillment, gathers items, and populates the child lines.
      */
     const reduce = (context) => {
-         const packageId = context.key;
+        const packageId = context.key;
         // const transactionId = context.values[0]; // The tranid passed from map
 
         // const packageId = 29952061;
-       
+
         try {
             // Load the Package Record in dynamic mode
             const packageload = record.load({
@@ -53,15 +53,15 @@ define(['N/record', 'N/search', 'N/log'], (record, search, log) => {
             // if (!isjyswms) {
             //     log.debug('Skipping Record', `Package ID: ${packageId} not created from JYSWMS process.`);
             //     return;
-            // }
-           
+            // }            
+
             const savedId = packageload.save({
                 ignoreMandatoryFields: true
             });
 
-         
+
             log.audit('Success', `Updated Package ID: ${savedId} successfully.`);
-            
+
         } catch (e) {
             log.error(`Error processing Package ID: ${packageId}`, e.toString());
         }

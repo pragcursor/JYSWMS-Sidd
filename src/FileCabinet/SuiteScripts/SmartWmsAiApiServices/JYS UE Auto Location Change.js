@@ -23,13 +23,15 @@ define([
     const REASON_OTHER_LOCATION = 5;
 
     // =========================================================
-    // SEND DATA FUNCTION (FIXED SCOPE ISSUE)
+    // SEND DATA
     // =========================================================
     const sendData = (payload) => {
 
+       // log.audit('SEND DATA - START', JSON.stringify(payload));
+
         const token = tokenModule.generateToken();
         if (!token) {
-            log.error('sendData', 'Token generation failed');
+            log.error('SEND DATA - Token Failed', 'Token generation failed');
             return;
         }
 
@@ -43,13 +45,18 @@ define([
                 body: JSON.stringify(payload)
             });
 
+            // log.audit('SEND DATA - RESPONSE', {
+            //     code: response.code,
+            //     body: response.body
+            // });
+
             return {
                 success: response.code === 200,
                 response: response.body || ''
             };
 
         } catch (e) {
-            log.error('sendData Error', e);
+            log.error('SEND DATA - ERROR', e);
             return { success: false, error: e.message };
         }
     };
@@ -59,7 +66,13 @@ define([
     // =========================================================
     const afterSubmit = (context) => {
 
-        if (![context.UserEventType.CREATE, context.UserEventType.EDIT].includes(context.type)) {
+        // log.audit('AFTER SUBMIT - START', {
+        //     type: context.type,
+        //     recordId: context.newRecord.id
+        // });
+
+        if (![context.UserEventType.EDIT].includes(context.type)) {
+           // log.audit('EXIT', 'Not CREATE or EDIT'); ![context.UserEventType.CREATE,
             return;
         }
 
@@ -68,20 +81,35 @@ define([
             const newRec = context.newRecord;
             const soId = newRec.id;
             const soType = newRec.type;
-            // if(soId != 62730674){
-            //     return;
-            // }
-            if (soType !== record.Type.SALES_ORDER) return;
+            if (soId != 62696792) {
+                return;
+            }
+            if (soType !== record.Type.SALES_ORDER) {
+                log.audit('EXIT', 'Not Sales Order');
+                return;
+            }
 
             const autoLocEnabled = newRec.getValue('custbody_jyswms_enable_auto_loc_chng');
             const alreadyUpdated = newRec.getValue('custbody_jyswms_loc_updated');
             const status = newRec.getValue('status');
 
-            if (['Closed', 'Cancelled', 'Billed'].includes(status)) return;
-            if (!autoLocEnabled || alreadyUpdated) return;
+          //  log.debug('HEADER CHECK', { autoLocEnabled, alreadyUpdated, status });
+
+            if (['Closed', 'Cancelled', 'Billed'].includes(status)) {
+               // log.audit('EXIT', 'Invalid status');
+                return;
+            }
+
+            if (!autoLocEnabled || alreadyUpdated) {
+                //log.audit('EXIT', 'Auto loc disabled or already updated');
+                return;
+            }
 
             const customerId = newRec.getValue({ fieldId: 'entity' });
-            if (!customerId) return;
+            if (!customerId) {
+              //  log.audit('EXIT', 'No customer');
+                return;
+            }
 
             const customerLookup = search.lookupFields({
                 type: search.Type.CUSTOMER,
@@ -97,7 +125,12 @@ define([
                 customerLookup.custentity_single_if === true ||
                 customerLookup.custentity_single_if === 'T';
 
-            if (!isJysEnabled) return;
+           // log.debug('CUSTOMER FLAGS', { isJysEnabled, isSingleIFCustomer });
+
+            if (!isJysEnabled) {
+               // log.audit('EXIT', 'Customer not enabled');
+                return;
+            }
 
             const so = record.load({
                 type: soType,
@@ -106,20 +139,16 @@ define([
             });
 
             const lineCount = so.getLineCount({ sublistId: 'item' });
+
+           // log.debug('LINE COUNT', lineCount);
+
             if (!lineCount) return;
 
-            // 🔥 BLOCK: Single IF + Multi Line
-            if (isSingleIFCustomer && lineCount > 1) {
-                log.error('Single IF Customer', 'Single IF customer with multiple lines. Marking as updated without changes.');
-                // record.submitFields({
-                //     type: soType,
-                //     id: soId,
-                //     values: { custbody_jyswms_loc_updated: true },
-                //     options: { enableSourcing: false, ignoreMandatoryFields: true }
-                // });
+            // if (isSingleIFCustomer && lineCount > 1) {
+            //   //  log.audit('EXIT', 'Single IF customer with multiple lines');
+            //     return;
+            // }
 
-                return;
-            }
             const itemSet = new Set();
 
             for (let i = 0; i < lineCount; i++) {
@@ -148,24 +177,37 @@ define([
                     })
                 ) || 0;
 
-                if (pickedQty <= 0 || pickedQty < quantity) {
-
-                    const itemId = so.getSublistValue({
+                const itemId = String(
+                    so.getSublistValue({
                         sublistId: 'item',
                         fieldId: 'item',
                         line: i
-                    });
+                    })
+                );
 
-                    if (itemId) itemSet.add(itemId);
+                // log.debug('LINE EVAL', {
+                //     line: i,
+                //     itemId,
+                //     quantity,
+                //     pickedQty
+                // });
+
+                if (pickedQty <= 0 || pickedQty < quantity) {
+                    itemSet.add(itemId);
                 }
             }
 
+            //log.debug('ITEM SET', Array.from(itemSet));
+
             if (!itemSet.size) {
+               // log.audit('No items require evaluation');
                 markComplete(soType, soId);
                 return;
             }
 
             const inventoryMap = {};
+
+           // log.audit('INVENTORY SEARCH START', Array.from(itemSet));
 
             search.create({
                 type: 'inventorybalance',
@@ -183,9 +225,11 @@ define([
                 columns: ['item', 'location', 'available']
             }).run().each(result => {
 
-                const itemId = result.getValue('item');
-                const locId = result.getValue('location');
+                const itemId = String(result.getValue('item'));
+                const locId = String(result.getValue('location'));
                 const qty = parseFloat(result.getValue('available')) || 0;
+
+               // log.debug('INVENTORY ROW', { itemId, locId, qty });
 
                 if (!inventoryMap[itemId]) inventoryMap[itemId] = {};
                 if (!inventoryMap[itemId][locId]) inventoryMap[itemId][locId] = 0;
@@ -194,6 +238,8 @@ define([
 
                 return true;
             });
+
+          //  log.audit('INVENTORY MAP BUILT', JSON.stringify(inventoryMap));
 
             let anyLineUpdated = false;
             let newHeaderLocation = null;
@@ -209,12 +255,14 @@ define([
 
                 if (itemType !== 'InvtPart') continue;
 
-                const itemId = so.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'item',
-                    line: i
-                });
-
+                const itemId = String(
+                    so.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'item',
+                        line: i
+                    })
+                );
+               
                 if (!inventoryMap[itemId]) continue;
 
                 const qtyRequired = parseFloat(
@@ -225,24 +273,47 @@ define([
                     })
                 ) || 0;
 
-                const currentLoc = so.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'location',
-                    line: i
-                });
-
-                if (
-                    inventoryMap[itemId][currentLoc] &&
-                    inventoryMap[itemId][currentLoc] >= qtyRequired
-                ) continue;
+                const currentLoc = String(
+                    so.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'location',
+                        line: i
+                    })
+                );
+              //   log.debug('EVALUATING LINE', { line: i, itemId });
+              //   log.debug('INVENTORY CHECK', { itemId, inventoryMap: inventoryMap[itemId] });
+                const currentAvailable =
+                    (inventoryMap[itemId][currentLoc]) || 0;
 
                 const alternateLoc =
                     currentLoc === LOC_HARDEE ? LOC_FLEMINGTON : LOC_HARDEE;
 
-                if (
-                    inventoryMap[itemId][alternateLoc] &&
-                    inventoryMap[itemId][alternateLoc] >= qtyRequired
-                ) {
+                const alternateAvailable =
+                    (inventoryMap[itemId][alternateLoc]) || 0;
+
+                log.debug('INVENTORY DECISION for SOID: ' + soId, {
+                    line: i,
+                    itemId,
+                    qtyRequired,
+                    currentLoc,
+                    currentAvailable,
+                    alternateLoc,
+                    alternateAvailable
+                });
+
+                if (currentAvailable >= qtyRequired) {
+                    log.debug('DECISION for SOID: ' + soId, 'Sufficient at current location');
+                    continue;
+                }
+
+                if (alternateAvailable >= qtyRequired) {
+
+                    log.audit('LOCATION SWITCH for SOID: ' + soId, {
+                        line: i,
+                        itemId,
+                        from: currentLoc,
+                        to: alternateLoc
+                    });
 
                     so.setSublistValue({
                         sublistId: 'item',
@@ -285,13 +356,15 @@ define([
                     value: true
                 });
 
+                log.audit('SAVING SO for SOID: ' + soId, soId);
+
                 so.save({
                     enableSourcing: false,
                     ignoreMandatoryFields: true
                 });
-                log.audit('Auto Location Change', `Updated SO ${soId} with new locations for items: ${Array.from(updatedItemIds).join(', ')}`);
 
             } else {
+              //  log.audit('No lines updated for SOID: ' + soId, soId);
                 markComplete(soType, soId);
             }
 
@@ -302,6 +375,8 @@ define([
                     salesOrderItemId: Array.from(updatedItemIds)
                 };
 
+              //  log.audit('CALLING DUP API for SOID: ' + soId, payload);
+
                 const responseJson = autoLocUtil.getOrdersDUP(payload);
 
                 if (responseJson && responseJson.length > 0) {
@@ -310,11 +385,13 @@ define([
             }
 
         } catch (error) {
-            log.error('Error in SO Auto Location Change', error);
+            log.error('AFTER SUBMIT ERROR for SOID: ' + soId, error);
         }
     };
 
     const markComplete = (type, id) => {
+      //  log.audit('MARK COMPLETE for SOID: ' + id, id);
+
         record.submitFields({
             type: type,
             id: id,
@@ -322,7 +399,6 @@ define([
             options: { enableSourcing: false, ignoreMandatoryFields: true }
         });
     };
-
     // =========================================================
     // BEFORE SUBMIT
     // =========================================================

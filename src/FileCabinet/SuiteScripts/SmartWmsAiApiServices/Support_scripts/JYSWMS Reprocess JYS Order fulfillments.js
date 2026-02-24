@@ -45,6 +45,13 @@ define(['N/search', 'N/record'], function (search, record) {
                     id: customRecordId,
                     isDynamic: false
                 });
+                var currentApprovalStatus = rec.getValue("custrecord_jyswms_approved");
+                if (!currentApprovalStatus) {
+                    var approve = rec.setValue({
+                        fieldId: "custrecord_jyswms_approved",
+                        value: true
+                    });
+                }
 
                 rec.save({
                     enableSourcing: false,

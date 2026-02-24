@@ -16,7 +16,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var isApproved = newRec.getValue({ fieldId: 'custrecord_jyswms_approved' });
             var itemFulfill = newRec.getValue({ fieldId: 'custrecord_jyswms_rel_item_ful' });
             var isPackagesUpdated = newRec.getValue({ fieldId: 'custrecord_jyswms_package_updated' });
-          
+
             var salesOrderId = newRec.getValue({ fieldId: 'custrecord_jyswms_sales_order_id' });
             var headerPickedQty = newRec.getValue({ fieldId: 'custrecord_jyswms_total_pick_qty' });
             var totalSoQuantity = newRec.getValue({ fieldId: 'custrecord_jyswms_total_so_qty' });
@@ -26,25 +26,25 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var singleIf = issingleif(recordId, salesOrderId)
 
 
-          if (headerPickedQty == 0 && !isPackagesUpdated) {
+            if (headerPickedQty == 0 && !isPackagesUpdated) {
 
-             record.submitFields({
+                record.submitFields({
                     type: 'customrecord_order_fulfillment_details',
                     id: recordId,
                     values: {
                         custrecord_jyswms_total_pick_qty: totalSoQuantity
                     }
                 });
-            
-          }
+
+            }
 
 
-             var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
+            var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
 
             if (itemFulfill) {
                 return;
             }
-          
+
             if (donttrigger) {
                 return;
             }
@@ -248,7 +248,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
 
                 // ✅ Validate totals
-                if (headerPickedQty !== totalQuantity && singleIf ) {
+                if (headerPickedQty !== totalQuantity && singleIf) {
 
                     if (totalQuantity == totalSoQuantity) {
 
@@ -274,15 +274,15 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         return;
                     }
                 }
-              else{
-                  record.submitFields({
-                            type: 'customrecord_order_fulfillment_details',
-                            id: recordId,
-                            values: {
-                                custrecord_jyswms_total_pick_qty: totalQuantity
-                            }
-                        });
-              }
+                else {
+                    record.submitFields({
+                        type: 'customrecord_order_fulfillment_details',
+                        id: recordId,
+                        values: {
+                            custrecord_jyswms_total_pick_qty: totalQuantity
+                        }
+                    });
+                }
 
                 log.error("FINAL MERGED LINES", JSON.stringify(lines));
 
@@ -394,44 +394,44 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
         }
     }
 
-     function issingleif(headerId, salesOrderId) {
-            let isSingleIf = false;
-            if (headerId) {
+    function issingleif(headerId, salesOrderId) {
+        let isSingleIf = false;
+        if (headerId) {
 
-                const salesorderSearchObj = search.create({
-                    type: "salesorder",
-                    filters: [
-                        ["type", "anyof", "SalesOrd"],
-                        "AND",
-                        ["internalid", "anyof", salesOrderId],
-                        "AND",
-                        ["mainline", "is", "T"]
-                    ],
-                    columns: [
-                        search.createColumn({
-                            name: "custentity_single_if",
-                            join: "customer"
-                        })
-                    ]
-                });
-
-                salesorderSearchObj.run().each(function (result) {
-
-                    var singleIFValue = result.getValue({
+            const salesorderSearchObj = search.create({
+                type: "salesorder",
+                filters: [
+                    ["type", "anyof", "SalesOrd"],
+                    "AND",
+                    ["internalid", "anyof", salesOrderId],
+                    "AND",
+                    ["mainline", "is", "T"]
+                ],
+                columns: [
+                    search.createColumn({
                         name: "custentity_single_if",
                         join: "customer"
-                    });
+                    })
+                ]
+            });
 
-                    isSingleIf = singleIFValue === true || singleIFValue === 'T';
+            salesorderSearchObj.run().each(function (result) {
 
-                    return false; // Only one result expected
+                var singleIFValue = result.getValue({
+                    name: "custentity_single_if",
+                    join: "customer"
                 });
 
+                isSingleIf = singleIFValue === true || singleIFValue === 'T';
 
-              
-            }
-            return isSingleIf;
+                return false; // Only one result expected
+            });
+
+
+
         }
+        return isSingleIf;
+    }
 
     function FullFillOrders(jsonData, customRecId, itemIdsInOrder) {
         var results = {};
@@ -478,7 +478,30 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 // Set mandatory values
                 itemFulfillment.setValue({ fieldId: 'trandate', value: new Date() });
 
+                var singleIf = issingleif(customRecId, salesOrderId);
 
+                if (singleIf) {
+
+                    // Always use Sales Order header location
+                    var locationLookup = search.lookupFields({
+                        type: search.Type.SALES_ORDER,
+                        id: salesOrderId,
+                        columns: ['location']
+                    });
+
+                    var soHeaderLocation = locationLookup.location.length
+                        ? locationLookup.location[0].value
+                        : null;
+
+                    if (soHeaderLocation) {
+                        itemFulfillment.setValue({
+                            fieldId: 'location',
+                            value: soHeaderLocation
+                        });
+                    }
+
+                    log.audit("Single IF TRUE - Using SO Header Location", soHeaderLocation);
+                }
                 var itemsFulfilled = false;
                 var itemMap = {};
 
@@ -498,7 +521,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     }
 
                     // bulkStageBin = (line.locationId == 9) ? 4859 : 16692;
-                    if (line.locationId) {
+                    if (line.locationId && singleIf == false) {
                         log.error("(line.locationId", line.locationId);
                         itemFulfillment.setValue({ fieldId: 'location', value: line.locationId });
 
@@ -606,14 +629,33 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
                         try {
 
-                            if (itemData.locationId || itemData.bins[0].locationId) {
-                                itemFulfillment.setCurrentSublistValue({
-                                    sublistId: 'item',
-                                    fieldId: 'location',
-                                    value: itemData.bins[0].locationId || itemData.locationId
-                                });
-                            }
+                            // if (itemData.locationId || itemData.bins[0].locationId) {
+                            //     itemFulfillment.setCurrentSublistValue({
+                            //         sublistId: 'item',
+                            //         fieldId: 'location',
+                            //         value: itemData.bins[0].locationId || itemData.locationId
+                            //     });
+                            // }
                             // Set location
+
+                            var singleIf = issingleif(customRecId, salesOrderId);
+
+                            if (!singleIf) {
+
+                                // Existing behavior (multi-location)
+                                if (itemData.locationId || itemData.bins[0].locationId) {
+                                    itemFulfillment.setCurrentSublistValue({
+                                        sublistId: 'item',
+                                        fieldId: 'location',
+                                        value: itemData.bins[0].locationId || itemData.locationId
+                                    });
+                                }
+
+                            } else {
+
+                                // 🔥 For Single IF — do NOT override header location
+                                log.audit("Single IF - Skipping line-level location override");
+                            }
 
                             // log.error({ title: 'itemData.bins[0].locationId', details: itemData.bins[0].locationId });
                         } catch (e) {

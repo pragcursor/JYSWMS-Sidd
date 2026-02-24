@@ -26,7 +26,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 isDynamic: true
             });
 
-           
+
 
             var tranId = pkgRec.getValue({
                 fieldId: 'custrecord_hj_packagecontents_sublist'
@@ -65,14 +65,22 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     return; // HARD STOP
                 }
             }
+
+            if (existingLineCount > 0) {
+
+                pkgRec.setValue({
+                    fieldId: 'custrecord_jyswms_item_not_populated',
+                    value: false
+                });
+            }
             /** ------------------------------------------ */
 
-             var itemDetails = getItemDetails(tranId, itemId);
+            var itemDetails = getItemDetails(tranId, itemId);
             // //log.debug('itemDetails', itemDetails);
-             if (!itemDetails || !itemDetails.length) return;
-
-             // FORCE SINGLE LINE
-             var item = itemDetails[0];
+            if (!itemDetails || !itemDetails.length) return;
+            var updated = false;
+            // FORCE SINGLE LINE
+            var item = itemDetails[0];
             if (existingLineCount <= 0) {
                 pkgRec.selectNewLine({ sublistId: sublistId });
                 pkgRec.setCurrentSublistValue({
@@ -96,7 +104,18 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     value: item.weight
                 });
                 pkgRec.commitLine({ sublistId: sublistId });
+                updated = true;
             }
+            if(updated) {
+                pkgRec.setValue({
+                    fieldId: 'custrecord_jyswms_item_not_populated',
+                    value: false
+                });
+            }
+            // pkgRec.setValue({
+            //     fieldId: 'custrecord_jyswms_item_not_populated',
+            //     value: true
+            // });
             pkgRec.save({
                 enableSourcing: false,
                 ignoreMandatoryFields: true

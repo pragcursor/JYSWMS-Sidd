@@ -1043,35 +1043,35 @@ adjustmentRecord.setValue({
 
           
             // Create the Bin Transfer record
-            const binTransfer = record.create({
+            const binTransferRec = record.create({
                 type: record.Type.BIN_TRANSFER,
                 isDynamic: true
             });
 
-            binTransfer.setValue({
+            binTransferRec.setValue({
                 fieldId: 'subsidiary',
                 value: 1
             });
-            binTransfer.setValue({
+            binTransferRec.setValue({
                 fieldId: 'location',
                 value: locationId
             });
-            binTransfer.setValue({
+            binTransferRec.setValue({
                 fieldId: 'memo',
                 value: data.binName
             });
-            binTransfer.setValue({
+            binTransferRec.setValue({
                 fieldId: 'custbody_wms_ai_created_by',
                 value: true
             });
 
           
-            binTransfer.setValue({
+            binTransferRec.setValue({
                 fieldId: 'custbody_wms_ai_pickername',
                value: pickerName || '' });
 
 
-            var locationID = binTransfer.getValue('location');
+            var locationID = binTransferRec.getValue('location');
             log.error("locationID", locationID);
 
             var lineCount = 0;
@@ -1118,37 +1118,37 @@ adjustmentRecord.setValue({
                         return;
                     }
 
-                    binTransfer.selectNewLine({
+                    binTransferRec.selectNewLine({
                         sublistId: 'inventory'
                     });
 
                    
-                    binTransfer.setCurrentSublistValue({
+                    binTransferRec.setCurrentSublistValue({
                         sublistId: 'inventory',
                         fieldId: 'item',
                         value: item.itemId
                     });
 
 
-                    var itemId = binTransfer.getCurrentSublistValue({
+                    var itemId = binTransferRec.getCurrentSublistValue({
                         sublistId: 'inventory',
                         fieldId: 'item'
                     });
                     log.error("itemId", itemId);
 
-                    binTransfer.setCurrentSublistValue({
+                    binTransferRec.setCurrentSublistValue({
                         sublistId: 'inventory',
                         fieldId: 'quantity',
                         value: item.quantity
                     });
 					
-                    var quantity = binTransfer.getCurrentSublistValue({
+                    var quantity = binTransferRec.getCurrentSublistValue({
                         sublistId: 'inventory',
                         fieldId: 'quantity'
                     });
 					
                     log.error("quantity", quantity);
-                    const inventoryDetail = binTransfer.getCurrentSublistSubrecord({
+                    const inventoryDetail = binTransferRec.getCurrentSublistSubrecord({
                         sublistId: 'inventory',
                         fieldId: 'inventorydetail'
                     });
@@ -1198,7 +1198,7 @@ adjustmentRecord.setValue({
                     }
 
                     if (invAsg) {
-                        binTransfer.commitLine({
+                        binTransferRec.commitLine({
                             sublistId: 'inventory'
                         });
                         log.error("Line committed", itemId);
@@ -1219,13 +1219,13 @@ adjustmentRecord.setValue({
             const hasErrors = results.length > 0;
             let binTransferId = null;
 
-            lineCount = binTransfer.getLineCount({
+            lineCount = binTransferRec.getLineCount({
                 sublistId: 'inventory'
             });
        //     log.error("lineCount", lineCount);
 
             if (!hasErrors && lineCount > 0) {
-                binTransferId = binTransfer.save({
+                binTransferId = binTransferRec.save({
                     enableSourcing: true,
                     ignoreMandatoryFields: true
                 });

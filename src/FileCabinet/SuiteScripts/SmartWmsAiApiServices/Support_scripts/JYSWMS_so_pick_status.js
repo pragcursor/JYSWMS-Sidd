@@ -30,7 +30,6 @@ define([
 
             // Skip excluded customers
             if (customerId == 476 || customerId == 1807) {
-                log.debug('Skipping JYS WMS Logic', 'Customer excluded: ' + customerId);
                 return;
             }
 
@@ -51,9 +50,9 @@ define([
             // -----------------------------
 
             var approvalDone = newRecord.getValue('custbody_jyswms_approval_processed');
-            var orderStatus = newRecord.getValue('orderstatus'); // A = Pending Approval
+            var orderStatus = newRecord.getValue('orderstatus');
 
-            if (!approvalDone && orderStatus === 'A' && (customerId !== 476 && customerId !== 1807)) {
+            if (!approvalDone && orderStatus === 'A' && (customerId != 476 && customerId != 1807)) {
 
                 record.submitFields({
                     type: record.Type.SALES_ORDER,
@@ -96,37 +95,36 @@ define([
                 sourceArray = responseObj.notcompleted;
             }
 
-            if (!sourceArray || sourceArray.length === 0) return;
-            if (!sourceArray[0].data || sourceArray[0].data.length === 0) return;
-            
-            // -----------------------------
-            // BUILD PICKED MAP (lineuniquekey → qty)
-            // -----------------------------
-
-            var pickedMap = {};
-
-            sourceArray[0].data.forEach(function (line) {
-
-                if (line.is_picked === 'picked' && line.unique_id) {
-
-                    // Remove suffix after underscore
-                    var cleanUniqueId = line.unique_id.split('_')[0];
-
-                    var qty = parseFloat(line.quantity) || 0;
-
-                    if (qty > 0) {
-                        pickedMap[String(cleanUniqueId)] = qty;
-                    }
-                }
-            });
-
-            if (Object.keys(pickedMap).length === 0) {
-               // log.debug('No picked lines returned from API');
+            if (!sourceArray.length || !sourceArray[0].data || !sourceArray[0].data.length) {
                 return;
             }
 
             // -----------------------------
-            // LOAD SALES ORDER FOR UPDATE
+            // BUILD RETURN MAP
+            // lineuniquekey → qty (0 if not picked)
+            // -----------------------------
+
+            var returnedMap = {};
+
+            sourceArray[0].data.forEach(function (line) {
+
+                if (!line.unique_id) return;
+
+                var cleanUniqueId = line.unique_id.split('_')[0];
+                var key = String(cleanUniqueId);
+
+                if (line.is_picked === 'picked') {
+                    returnedMap[key] = parseFloat(line.quantity) || 0;
+                } else {
+                    returnedMap[key] = 0;
+                }
+
+            });
+
+            if (!Object.keys(returnedMap).length) return;
+
+            // -----------------------------
+            // LOAD SALES ORDER
             // -----------------------------
 
             var soRec = record.load({
@@ -136,6 +134,7 @@ define([
             });
 
             var lineCount = soRec.getLineCount({ sublistId: 'item' });
+            var hasChanges = false;
 
             for (var i = 0; i < lineCount; i++) {
 
@@ -147,29 +146,56 @@ define([
 
                 if (!lineUniqueKey) continue;
 
-                if (!pickedMap[String(lineUniqueKey)]) continue;
+                var key = String(lineUniqueKey);
 
-                var qtyToApply = pickedMap[String(lineUniqueKey)];
+                // Only update if line exists in JSON
+                if (!returnedMap.hasOwnProperty(key)) continue;
 
-                soRec.setSublistValue({
+                var newQty = returnedMap[key];
+
+                var currentQty = soRec.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'custcol_jyswms_picked_qty',
-                    line: i,
-                    value: qtyToApply
-                });
+                    line: i
+                }) || 0;
 
-                log.debug('Updated line',
-                    'LineUniqueKey: ' + lineUniqueKey +
-                    ' | Qty: ' + qtyToApply
-                );
+              //  if (Number(currentQty) !== Number(newQty)) 
+                    {
+
+                    soRec.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jyswms_picked_qty',
+                        line: i,
+                        value: newQty
+                    });
+
+                    hasChanges = true;
+
+                    log.debug('Line Updated',
+                        'LineUniqueKey: ' + key +
+                        ' | Item: ' + soRec.getSublistText({ sublistId: 'item', fieldId: 'item', line: i }) +
+                        ' | Old: ' + currentQty +
+                        ' | New: ' + newQty
+                    );
+                }
             }
 
-            soRec.save({
-                enableSourcing: false,
-                ignoreMandatoryFields: true
-            });
+            // -----------------------------
+            // SAVE ONLY IF CHANGED
+            // -----------------------------
 
-            log.audit('Picked quantities updated (by unique id)', 'SO ID ' + recId);
+            if (hasChanges) {
+
+                soRec.save({
+                    enableSourcing: false,
+                    ignoreMandatoryFields: true
+                });
+
+                log.audit('Picked quantities updated', 'SO ID ' + recId);
+
+            } else {
+               // log.debug('No changes detected — skipping save()', 'SO ID ' + recId);
+            }
 
         } catch (e) {
 

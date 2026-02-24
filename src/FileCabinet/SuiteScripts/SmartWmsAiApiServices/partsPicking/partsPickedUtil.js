@@ -175,7 +175,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
 
 
 
-                    log.debug("trackingNumbers", trackingNumbers);
+                    log.error("trackingNumbers", trackingNumbers);
 
 
                     log.audit('Processing SO in parts picking', {
@@ -198,7 +198,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
 
                     // Validate required fields before proceeding
                     if (!itemId) {
-                        log.debug('Missing itemId for sales order', salesOrderId);
+                        log.error('Missing itemId for sales order', salesOrderId);
                         continue;
                     }
 
@@ -216,12 +216,12 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                     if (pickQty === null || pickQty === undefined) {
 
 
-                        log.debug('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
+                        log.error('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
                         continue;
 
                     }
                     if (!locationId) {
-                        log.debug('Missing locationId for sales order', salesOrderId);
+                        log.error('Missing locationId for sales order', salesOrderId);
                         continue;
                     }
 
@@ -229,7 +229,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
 
                     // STEP 3: Load or create header
                     headerId = existingMap[salesOrderId];
-                    log.debug("headerId", headerId);
+                    log.error("headerId", headerId);
                     var headerRec;
                     if (headerId) {
                         headerRec = record.load({
@@ -249,12 +249,12 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                         // Save new record first to get the ID before adding lines
                         headerId = headerRec.save();
                         existingMap[salesOrderId] = headerId;
-                       // log.debug("Created new header record", headerId);
+                       // log.error("Created new header record", headerId);
                     }
 
                     // STEP 4: Create Bin Transfer
                     if (savedId) {
-                        log.debug("savedId -- bintrnasferid", savedId);
+                        log.error("savedId -- bintrnasferid", savedId);
                     } else {
 
                         try {
@@ -490,7 +490,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                                 ignoreMandatoryFields: true
                             });
 
-                            log.debug(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
+                            log.error(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
                         }
                     } catch (negativeInvError) {
                         log.error(" Negative Inventory Adjustment Error", {
