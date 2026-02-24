@@ -8,13 +8,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
     './Orders/JY_so_picked_stats_EOD',
     './Items/itemUtils',
     './Inventory/inventoryUtils',
+    './Inventory/Jys_retriggering_items_So_data.js',
     './Locations/locationUtils',
     './Tracking/trackingUtils',
     './Returns/returnUtils',
     './partsPicking/partsPickedUtil',
     './markAsPicked/markAsPickedUtil'
 ], function (file, record, error, log, https, search, runtime, binUtils, orderUtils, jySoPickedStatsEOD, itemUtils,
-    inventoryUtils, locationUtils, trackingUtils, returnUtils, partsPickedUtil, markAsPickedUtil) {
+    inventoryUtils, jysRetriggeringItemsSoData, locationUtils, trackingUtils, returnUtils, partsPickedUtil, markAsPickedUtil) {
 
     function get(context) {
         try {
@@ -763,12 +764,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 }
 
             }
-            if (action != "submitPallet" && action != "dropShipmentData" && action !== "post_returnOrders" && action !== "sopicked_endoftheday") {
+            var excludedActionsForLookup = ["submitPallet", "dropShipmentData", "post_returnOrders", "sopicked_endoftheday","itemnotpicked_invchecked"];
+            if (excludedActionsForLookup.indexOf(action) === -1) {
                 isExistsResp = lookForExistingRecords(context);
             }
-            // if (action != "submitPallet") {
-            //     isExistsResp = lookForExistingRecords(context);
-            // }
+            
             if (isExistsResp) {
                 log.error("Already exists, Response : ", isExistsResp);
                 return isExistsResp
@@ -815,6 +815,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     break;
                 case 'sopicked_endoftheday':
                     recType = 'Sales Order'
+                    break;
+                case 'itemnotpicked_invchecked':
+                    recType = 'inv_item_not_picked';
                     break;
                 default:
                     return {
@@ -936,6 +939,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     break;
                 case 'binTransfer':
                     response = binUtils.binTransfer(context, id);
+                    break;
+                case 'itemnotpicked_invchecked':
+                    response = jysRetriggeringItemsSoData.getItemInventorydata(context.data);
                     break;
                 case 'markAsPicked':
                     // log.error("Context before markAsPicked", context);
@@ -2433,7 +2439,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
     }
     */
 
-  
+
 
 
     function markAsPicked(requestBody, jyswmsApiCustRecId) {
@@ -2725,7 +2731,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         // log.error("Created new header record", headerId);
                     }
 
-                   savedHeaders.push(headerId);
+                    savedHeaders.push(headerId);
 
 
                     // STEP 4: Create Bin Transfer
@@ -3058,7 +3064,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     }
 
-                  
+
 
                     itemRec.setValue({ fieldId: 'custrecord_jyswms_item_uniqueid', value: uniqueId });
                     itemRec.setValue({ fieldId: 'custrecord_jyswms_item_portal_id', value: portalId });
@@ -3119,112 +3125,112 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
 
 
-                    trackingNumbers.forEach(function (track) {
+                    // trackingNumbers.forEach(function (track) {
 
-                        // if (!track || !track.ssccCode) {
-                        //     log.error("Skipping – SSCC missing", track);
-                        //     return;
-                        // }
-
-
-                        if (!track) {
-                            log.error("Skipping – track missing", track);
-                            return;
-                        }
-
-                        // CHECK IN SUBLIST (not input array)
-                        if (ssccExistsInSublist(headerRec, track.ssccCode)) {
-                            log.error("Skipping packageRec – SSCC already exists in sublist", track.ssccCode);
-                            return;
-                        }
+                    //     // if (!track || !track.ssccCode) {
+                    //     //     log.error("Skipping – SSCC missing", track);
+                    //     //     return;
+                    //     // }
 
 
-                        log.error("track", track);
+                    //     if (!track) {
+                    //         log.error("Skipping – track missing", track);
+                    //         return;
+                    //     }
 
-                        var packageRec = record.create({
-                            type: 'customrecordhj_tc_package_contents',
-                            isDynamic: true
-                        });
-                        packageRec.setValue({
-                            fieldId: 'custrecord_jyswms_createdfrom',
-                            value: true
-                        });
-
-                        packageRec.setValue({
-                            fieldId: 'custrecord_jyswms_related_cif',
-                            value: headerId
-                        });
-
-                        // SSCC code
-                        packageRec.setValue({
-                            fieldId: 'custrecordhj_ucc',
-                            value: track.ssccCode || ''
-                        });
-
-                        // Tracking number
-                        packageRec.setValue({
-                            fieldId: 'custrecordhj_pkg_trackingnumber',
-                            value: track.trackingNumber || ''
-                        });
-
-                        // If you want to link to fulfillment/parent record and you have the field, uncomment and set correct field id:
-                        // packageRec.setValue({ fieldId: 'custrecord_hj_packagecontents_sublist', value: fulfillmentId });
-
-                        packageRec.setValue({
-                            fieldId: 'custrecord_jyswms_item_id',
-                            value: itemId
-                        });
-
-                        var itemLookup = search.lookupFields({
-                            type: search.Type.ITEM,
-                            id: itemId,
-                            columns: ['weight']
-                        });
-
-                        var itemWeight = parseFloat(itemLookup.weight) || 0;
-                        var finalWeight = itemWeight;
-
-                        packageRec.setValue({
-                            fieldId: 'custrecordhj_tc_packagecontentslbs',
-                            value: finalWeight
-                        });
-
-                        var itemText = packageRec.getText({
-                            fieldId: 'custrecord_jyswms_item_id'
-                        });
+                    //     // CHECK IN SUBLIST (not input array)
+                    //     if (ssccExistsInSublist(headerRec, track.ssccCode)) {
+                    //         log.error("Skipping packageRec – SSCC already exists in sublist", track.ssccCode);
+                    //         return;
+                    //     }
 
 
-                        var package_Content = itemText + "/1";
-                        // Tracking number
-                        packageRec.setValue({
-                            fieldId: 'custrecordhj_pkg_desc',
-                            value: package_Content
-                        });
+                    //     log.error("track", track);
 
-                        packageRec.selectNewLine({
-                            sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent'
-                        });
+                    //     var packageRec = record.create({
+                    //         type: 'customrecordhj_tc_package_contents',
+                    //         isDynamic: true
+                    //     });
+                    //     packageRec.setValue({
+                    //         fieldId: 'custrecord_jyswms_createdfrom',
+                    //         value: true
+                    //     });
 
-                        packageRec.setCurrentSublistValue({
-                            sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent',
-                            fieldId: 'custrecordhj_tc_pkgcontents_lineitemitem',
-                            value: itemId
-                        });
+                    //     packageRec.setValue({
+                    //         fieldId: 'custrecord_jyswms_related_cif',
+                    //         value: headerId
+                    //     });
 
-                        packageRec.commitLine({
-                            sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent'
-                        });
+                    //     // SSCC code
+                    //     packageRec.setValue({
+                    //         fieldId: 'custrecordhj_ucc',
+                    //         value: track.ssccCode || ''
+                    //     });
 
-                        var packageId = packageRec.save({
-                            enableSourcing: true,
-                            ignoreMandatoryFields: false
-                        });
+                    //     // Tracking number
+                    //     packageRec.setValue({
+                    //         fieldId: 'custrecordhj_pkg_trackingnumber',
+                    //         value: track.trackingNumber || ''
+                    //     });
 
-                        packageLines.push(packageId);
+                    //     // If you want to link to fulfillment/parent record and you have the field, uncomment and set correct field id:
+                    //     // packageRec.setValue({ fieldId: 'custrecord_hj_packagecontents_sublist', value: fulfillmentId });
 
-                    });
+                    //     packageRec.setValue({
+                    //         fieldId: 'custrecord_jyswms_item_id',
+                    //         value: itemId
+                    //     });
 
-                   
+                    //     var itemLookup = search.lookupFields({
+                    //         type: search.Type.ITEM,
+                    //         id: itemId,
+                    //         columns: ['weight']
+                    //     });
+
+                    //     var itemWeight = parseFloat(itemLookup.weight) || 0;
+                    //     var finalWeight = itemWeight;
+
+                    //     packageRec.setValue({
+                    //         fieldId: 'custrecordhj_tc_packagecontentslbs',
+                    //         value: finalWeight
+                    //     });
+
+                    //     var itemText = packageRec.getText({
+                    //         fieldId: 'custrecord_jyswms_item_id'
+                    //     });
+
+
+                    //     var package_Content = itemText + "/1";
+                    //     // Tracking number
+                    //     packageRec.setValue({
+                    //         fieldId: 'custrecordhj_pkg_desc',
+                    //         value: package_Content
+                    //     });
+
+                    //     packageRec.selectNewLine({
+                    //         sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent'
+                    //     });
+
+                    //     packageRec.setCurrentSublistValue({
+                    //         sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent',
+                    //         fieldId: 'custrecordhj_tc_pkgcontents_lineitemitem',
+                    //         value: itemId
+                    //     });
+
+                    //     packageRec.commitLine({
+                    //         sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent'
+                    //     });
+
+                    //     var packageId = packageRec.save({
+                    //         enableSourcing: true,
+                    //         ignoreMandatoryFields: false
+                    //     });
+
+                    //     packageLines.push(packageId);
+
+                    // });
+
+
                     var soLookup = search.lookupFields({
                         type: 'salesorder',
                         id: salesOrderId,
@@ -3245,9 +3251,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         totalPickedQty += linePicked;
                     }
 
-                  if(totalPickedQty == 0){
-                    totalPickedQty = pickQty;
-                  }
+                    if (totalPickedQty == 0) {
+                        totalPickedQty = pickQty;
+                    }
 
                     // Calculate approval
                     var isApproved = (totalSOQty <= totalPickedQty);
@@ -3296,7 +3302,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     // Save header record with error handling
                     try {
-                      //  headerId = headerRec.save();
+                        //  headerId = headerRec.save();
                         // log.error("Saved Header", headerId);
                         existingMap[salesOrderId] = headerId;
 
@@ -3365,7 +3371,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
 
 
-  
+
     function getBinNameToIdMap() {
         try {
             var binMap = {};

@@ -27,7 +27,7 @@ define([
     // =========================================================
     const sendData = (payload) => {
 
-       // log.audit('SEND DATA - START', JSON.stringify(payload));
+        // log.audit('SEND DATA - START', JSON.stringify(payload));
 
         const token = tokenModule.generateToken();
         if (!token) {
@@ -72,7 +72,7 @@ define([
         // });
 
         if (![context.UserEventType.EDIT].includes(context.type)) {
-           // log.audit('EXIT', 'Not CREATE or EDIT'); ![context.UserEventType.CREATE,
+            // log.audit('EXIT', 'Not CREATE or EDIT'); ![context.UserEventType.CREATE,
             return;
         }
 
@@ -81,9 +81,9 @@ define([
             const newRec = context.newRecord;
             const soId = newRec.id;
             const soType = newRec.type;
-            if (soId != 62696792) {
-                return;
-            }
+            // if (soId != 62696792) {
+            //     return;
+            // }
             if (soType !== record.Type.SALES_ORDER) {
                 log.audit('EXIT', 'Not Sales Order');
                 return;
@@ -93,10 +93,10 @@ define([
             const alreadyUpdated = newRec.getValue('custbody_jyswms_loc_updated');
             const status = newRec.getValue('status');
 
-          //  log.debug('HEADER CHECK', { autoLocEnabled, alreadyUpdated, status });
+            //  log.debug('HEADER CHECK', { autoLocEnabled, alreadyUpdated, status });
 
             if (['Closed', 'Cancelled', 'Billed'].includes(status)) {
-               // log.audit('EXIT', 'Invalid status');
+                // log.audit('EXIT', 'Invalid status');
                 return;
             }
 
@@ -107,7 +107,7 @@ define([
 
             const customerId = newRec.getValue({ fieldId: 'entity' });
             if (!customerId) {
-              //  log.audit('EXIT', 'No customer');
+                //  log.audit('EXIT', 'No customer');
                 return;
             }
 
@@ -125,10 +125,10 @@ define([
                 customerLookup.custentity_single_if === true ||
                 customerLookup.custentity_single_if === 'T';
 
-           // log.debug('CUSTOMER FLAGS', { isJysEnabled, isSingleIFCustomer });
+            // log.debug('CUSTOMER FLAGS', { isJysEnabled, isSingleIFCustomer });
 
             if (!isJysEnabled) {
-               // log.audit('EXIT', 'Customer not enabled');
+                // log.audit('EXIT', 'Customer not enabled');
                 return;
             }
 
@@ -140,7 +140,7 @@ define([
 
             const lineCount = so.getLineCount({ sublistId: 'item' });
 
-           // log.debug('LINE COUNT', lineCount);
+            // log.debug('LINE COUNT', lineCount);
 
             if (!lineCount) return;
 
@@ -200,14 +200,14 @@ define([
             //log.debug('ITEM SET', Array.from(itemSet));
 
             if (!itemSet.size) {
-               // log.audit('No items require evaluation');
+                // log.audit('No items require evaluation');
                 markComplete(soType, soId);
                 return;
             }
 
             const inventoryMap = {};
 
-           // log.audit('INVENTORY SEARCH START', Array.from(itemSet));
+            // log.audit('INVENTORY SEARCH START', Array.from(itemSet));
 
             search.create({
                 type: 'inventorybalance',
@@ -229,7 +229,7 @@ define([
                 const locId = String(result.getValue('location'));
                 const qty = parseFloat(result.getValue('available')) || 0;
 
-               // log.debug('INVENTORY ROW', { itemId, locId, qty });
+                // log.debug('INVENTORY ROW', { itemId, locId, qty });
 
                 if (!inventoryMap[itemId]) inventoryMap[itemId] = {};
                 if (!inventoryMap[itemId][locId]) inventoryMap[itemId][locId] = 0;
@@ -239,7 +239,7 @@ define([
                 return true;
             });
 
-          //  log.audit('INVENTORY MAP BUILT', JSON.stringify(inventoryMap));
+            //  log.audit('INVENTORY MAP BUILT', JSON.stringify(inventoryMap));
 
             let anyLineUpdated = false;
             let newHeaderLocation = null;
@@ -262,7 +262,7 @@ define([
                         line: i
                     })
                 );
-               
+
                 if (!inventoryMap[itemId]) continue;
 
                 const qtyRequired = parseFloat(
@@ -280,8 +280,8 @@ define([
                         line: i
                     })
                 );
-              //   log.debug('EVALUATING LINE', { line: i, itemId });
-              //   log.debug('INVENTORY CHECK', { itemId, inventoryMap: inventoryMap[itemId] });
+                //   log.debug('EVALUATING LINE', { line: i, itemId });
+                //   log.debug('INVENTORY CHECK', { itemId, inventoryMap: inventoryMap[itemId] });
                 const currentAvailable =
                     (inventoryMap[itemId][currentLoc]) || 0;
 
@@ -364,7 +364,7 @@ define([
                 });
 
             } else {
-              //  log.audit('No lines updated for SOID: ' + soId, soId);
+                //  log.audit('No lines updated for SOID: ' + soId, soId);
                 markComplete(soType, soId);
             }
 
@@ -375,7 +375,7 @@ define([
                     salesOrderItemId: Array.from(updatedItemIds)
                 };
 
-              //  log.audit('CALLING DUP API for SOID: ' + soId, payload);
+                //  log.audit('CALLING DUP API for SOID: ' + soId, payload);
 
                 const responseJson = autoLocUtil.getOrdersDUP(payload);
 
@@ -390,7 +390,7 @@ define([
     };
 
     const markComplete = (type, id) => {
-      //  log.audit('MARK COMPLETE for SOID: ' + id, id);
+        //  log.audit('MARK COMPLETE for SOID: ' + id, id);
 
         record.submitFields({
             type: type,
@@ -418,9 +418,19 @@ define([
             if (!lineCount) return;
 
             const itemSet = new Set();
-
+            let allLinesPicked = true;
             for (let i = 0; i < lineCount; i++) {
+                const pickedRaw = soRec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'custcol_jyswms_picked_qty',
+                    line: i
+                });
 
+                const jypickedQty = parseFloat(pickedRaw);
+                // ---- NEW LOGIC (does not impact existing behavior) ----
+                if (pickedRaw == null || pickedRaw == '' || pickedRaw == undefined) {
+                    allLinesPicked = false;
+                }
                 const itemId = soRec.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'item',
@@ -447,6 +457,11 @@ define([
                     itemSet.add(itemId);
                 }
             }
+
+            soRec.setValue({
+                fieldId: 'custbody_jys_wms_sync_completed',
+                value: allLinesPicked                       //&& lineCount > 0
+            });
 
             if (!itemSet.size) return;
 

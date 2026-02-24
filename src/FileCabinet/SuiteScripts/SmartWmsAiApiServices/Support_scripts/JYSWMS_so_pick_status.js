@@ -29,9 +29,9 @@ define([
             if (!customerId) return;
 
             // Skip excluded customers
-            if (customerId == 476 || customerId == 1807) {
-                return;
-            }
+            // if (customerId == 476 || customerId == 1807) {
+            //     return;
+            // }
 
             // Lookup customer WMS flag
             var customerLookup = search.lookupFields({
@@ -135,7 +135,7 @@ define([
 
             var lineCount = soRec.getLineCount({ sublistId: 'item' });
             var hasChanges = false;
-
+            
             for (var i = 0; i < lineCount; i++) {
 
                 var lineUniqueKey = soRec.getSublistValue({
