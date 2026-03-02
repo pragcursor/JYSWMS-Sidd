@@ -61,12 +61,6 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 // return;
             }
 
-
-
-            if (headerPickedQty < totalSoQuantity && !fulfillPartilly) {
-                return;
-            }
-
             if (!isApproved) {
                 return;
             }
@@ -270,8 +264,9 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                                 custrecord_jyswms_approved: false
                             }
                         });
-
-                        return;
+                        if (totalQuantity < totalSoQuantity && !fulfillPartilly) {
+                            return;
+                        }
                     }
                 }
                 else {
@@ -353,7 +348,9 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     trackingNumbers: trackingNumbers,
                     ssccCodes: ssccCodes
                 };
-
+                if (totalQuantity < totalSoQuantity && !fulfillPartilly) {
+                    return;
+                }
                 log.error('Fulfillment Object', JSON.stringify(obj));
 
                 if (obj) {
@@ -390,13 +387,13 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
 
         } catch (e) {
-            log.error('afterSubmit error', e.message);
+            log.error('afterSubmit error', e);
         }
     }
 
     function issingleif(headerId, salesOrderId) {
         let isSingleIf = false;
-        if (headerId) {
+        if (headerId && salesOrderId) {
 
             const salesorderSearchObj = search.create({
                 type: "salesorder",
@@ -427,7 +424,11 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return false; // Only one result expected
             });
 
-
+            log.error("Single IF Check", {
+                headerId: headerId,
+                salesOrderId: salesOrderId,
+                isSingleIf: isSingleIf
+            });
 
         }
         return isSingleIf;
@@ -542,10 +543,12 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         adjustmentObj[key] = itemData.total - availableQty;
                     }
                 }
-
+                log.error("adjustmentObj", adjustmentObj)
                 if (Object.keys(adjustmentObj).length > 0) {
 
-                    var adjustmentId = createAdjustment(adjustmentObj, locationId);
+                    //  var adjustmentId = createAdjustment(adjustmentObj, locationId);
+                    var adjustmentId = createAdjustment(adjustmentObj, locationId, customRecId, salesOrderId);
+
 
                     record.submitFields({
                         type: 'customrecord_order_fulfillment_details',
@@ -593,7 +596,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     });
 
                     if (singleIf) {
-                        // 🔥 Force every line to header location
+                        // Force every line to header location
                         itemFulfillment.setCurrentSublistValue({
                             sublistId: 'item',
                             fieldId: 'location',
@@ -736,7 +739,8 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
         return results;
     }
 
-    function createAdjustment(adjustmentObj, locationId) {
+    //   function createAdjustment(adjustmentObj, locationId) {
+    function createAdjustment(adjustmentObj, locationId, headerID, salesOrderId) {
         try {
             if (!adjustmentObj || Object.keys(adjustmentObj).length === 0) {
                 log.error("No adjustments required");
@@ -757,6 +761,9 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             inventoryAdjRec.setValue({ fieldId: 'memo', value: 'Auto Positive Adjustment due to Bulk bin shortage for JYSWMS Order Fulfilment Details, ID ' });
             inventoryAdjRec.setValue({ fieldId: 'custbody_jyswms_excess_items', value: adjustmentObj });
             inventoryAdjRec.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
+            inventoryAdjRec.setValue({ fieldId: 'custbody_realted_jyorder', value: headerID });
+            inventoryAdjRec.setValue({ fieldId: 'custbody_realted_sales_order', value: salesOrderId });
+
 
 
             // Loop through shortage items
@@ -1016,7 +1023,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 }
 
                 // =====================================================
-                // 🛡 SAFE ADD / UPDATE LINES (NO OVER TRANSFER)
+                // SAFE ADD / UPDATE LINES (NO OVER TRANSFER)
                 // =====================================================
 
                 transferMap[fromLocation].forEach(function (item) {
@@ -1204,7 +1211,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 itemQtyMap[internalId] += parseFloat(availableQty || 0);
             });
         });
-
+        log.error("itemQtyMap", itemQtyMap)
         return itemQtyMap;
     }
 

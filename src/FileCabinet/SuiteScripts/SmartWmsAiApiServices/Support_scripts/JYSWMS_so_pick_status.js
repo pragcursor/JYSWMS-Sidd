@@ -96,32 +96,74 @@ define([
             }
 
             if (!sourceArray.length || !sourceArray[0].data || !sourceArray[0].data.length) {
-                return;
+                // return;
             }
 
+
+
             // -----------------------------
-            // BUILD RETURN MAP
-            // lineuniquekey → qty (0 if not picked)
+            // BUILD RETURN MAPS
+            // lineuniquekey → picked qty
+            // lineuniquekey → ready for pick (T/F)
+            // Collect ship errors per item
             // -----------------------------
 
             var returnedMap = {};
+            var readyForPickMap = {};
+            var shipErrorMap = {}; // key → error message
+            var shipErrorHeaderArray = [];
+            var jsonRetuned = 0;
+            if (sourceArray[0] && sourceArray[0].data && sourceArray[0].data.length > 0) {
+                try {
 
-            sourceArray[0].data.forEach(function (line) {
+                    sourceArray[0].data.forEach(function (line) {
 
-                if (!line.unique_id) return;
+                        if (!line.unique_id) return;
 
-                var cleanUniqueId = line.unique_id.split('_')[0];
-                var key = String(cleanUniqueId);
+                        jsonRetuned++;
 
-                if (line.is_picked === 'picked') {
-                    returnedMap[key] = parseFloat(line.quantity) || 0;
-                } else {
-                    returnedMap[key] = 0;
+                        var cleanUniqueId = line.unique_id.split('_')[0];
+                        var key = String(cleanUniqueId);
+
+                        // -----------------
+                        // Picked Qty Logic
+                        // -----------------
+                        if (line.is_picked === 'picked') {
+                            returnedMap[key] = parseFloat(line.quantity) || 0;
+                        } else {
+                            returnedMap[key] = 0;
+                        }
+
+                        // -----------------
+                        // Ready For Pick Logic
+                        // -----------------
+                        readyForPickMap[key] = line.ready_for_pick === true;
+
+                        // -----------------
+                        // Ship Error Logic
+                        // -----------------
+                        if (line.ship_error && line.ship_error !== false) {
+
+                            var errorMessage = line.ship_error.toString();
+
+                            shipErrorMap[key] = errorMessage;
+
+                            shipErrorHeaderArray.push(
+                                errorMessage + ' for ' + line.item
+                            );
+                        }
+
+                    });
+
+                } catch (e) {
+                    log.error('Error in JSON mapping, record Id=' + recId, e);
                 }
+            } else {
+                log.debug('No data lines returned from API', 'SO ID ' + recId);
+            }
 
-            });
-
-            if (!Object.keys(returnedMap).length) return;
+            // if (!Object.keys(returnedMap).length)
+            //return;
 
             // -----------------------------
             // LOAD SALES ORDER
@@ -135,7 +177,7 @@ define([
 
             var lineCount = soRec.getLineCount({ sublistId: 'item' });
             var hasChanges = false;
-            
+
             for (var i = 0; i < lineCount; i++) {
 
                 var lineUniqueKey = soRec.getSublistValue({
@@ -149,7 +191,17 @@ define([
                 var key = String(lineUniqueKey);
 
                 // Only update if line exists in JSON
-                if (!returnedMap.hasOwnProperty(key)) continue;
+                if (!returnedMap.hasOwnProperty(key)) {
+
+                    soRec.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jyswms_picked_qty',
+                        line: i,
+                        value: ''
+                    });
+                    hasChanges = true;
+                    continue;
+                }
 
                 var newQty = returnedMap[key];
 
@@ -159,8 +211,8 @@ define([
                     line: i
                 }) || 0;
 
-              //  if (Number(currentQty) !== Number(newQty)) 
-                    {
+                //  if (Number(currentQty) !== Number(newQty)) 
+                {
 
                     soRec.setSublistValue({
                         sublistId: 'item',
@@ -178,6 +230,55 @@ define([
                         ' | New: ' + newQty
                     );
                 }
+
+                // -----------------
+                // READY FOR PICK UPDATE
+                // -----------------
+                log.debug('Ready For Pick Check for SOID ' + recId, 'LineUniqueKey: ' + key + ' | Value: ' + readyForPickMap[key]);
+                if (readyForPickMap.hasOwnProperty(key)) {
+
+                    soRec.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jys_ready_for_pick',
+                        line: i,
+                        value: readyForPickMap[key]
+                    });
+
+                    hasChanges = true;
+                }
+            }
+
+            // -----------------------------
+            // SET HEADER SHIP ERROR FIELD
+            // -----------------------------
+
+            if (shipErrorHeaderArray.length > 0) {
+
+                var consolidatedErrors = shipErrorHeaderArray.join(', ');
+
+                soRec.setValue({
+                    fieldId: 'custbody_jys_ship_erros',
+                    value: consolidatedErrors
+                });
+
+            } else {
+
+                soRec.setValue({
+                    fieldId: 'custbody_jys_ship_erros',
+                    value: ''
+                });
+            }
+
+            if (jsonRetuned != lineCount) {
+                soRec.setValue({
+                    fieldId: 'custbody_jys_wms_sync_completed',
+                    value: false
+                });
+            } else {
+                soRec.setValue({
+                    fieldId: 'custbody_jys_wms_sync_completed',
+                    value: true
+                });
             }
 
             // -----------------------------
@@ -191,10 +292,10 @@ define([
                     ignoreMandatoryFields: true
                 });
 
-                log.audit('Picked quantities updated', 'SO ID ' + recId);
+                // log.audit('Picked quantities updated', 'SO ID ' + recId);
 
             } else {
-               // log.debug('No changes detected — skipping save()', 'SO ID ' + recId);
+                // log.debug('No changes detected — skipping save()', 'SO ID ' + recId);
             }
 
         } catch (e) {

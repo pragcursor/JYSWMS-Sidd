@@ -17,10 +17,6 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
     //     processPalletUpdate : processPalletUpdate,
     //     createImageFile:createImageFile
     // };
-
-
-
-
     function getDropShipOrdersPerOrder(context, pageSize, startIndex) {
         try {
 
@@ -4504,9 +4500,44 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             // non amazon dropship orders
             //    var headerSearch = search.load({ id: 4831 });
 
+            // if (filters.length > 0) {
+            //     headerSearch.filters = (headerSearch.filters || []).concat(filters);
+            // }
+
+         if (context.salesOrderHeaderId) {
+    filters.push(
+        search.createFilter({
+            name: 'internalid',
+            operator: search.Operator.ANYOF,
+            values: context.salesOrderHeaderId
+        })
+    );
+}
+
+
+            // non amazon dropship orders
+            //    var headerSearch = search.load({ id: 4831 });
+
             if (filters.length > 0) {
-                headerSearch.filters = (headerSearch.filters || []).concat(filters);
+
+            
+            // var filters = headerSearch.filters || [];
+              
+               headerSearch.filters = [];
+                    // filters.push(search.createFilter({
+
+                    //     name: 'internalid',
+
+                    //     operator: search.Operator.ANYOF,
+
+                    //     values: headerIds
+
+                    // }));
+
+                headerSearch.filters = filters;
             }
+
+          
 
             var totalCount = headerSearch.runPaged().count;
             var totalPages = Math.ceil(totalCount / pageSize);

@@ -417,6 +417,10 @@ define([
             const lineCount = soRec.getLineCount({ sublistId: 'item' });
             if (!lineCount) return;
 
+            const CLOSED_SYNC_START_DATE = new Date(2025, 0, 1);
+            // Month is 0-indexed → 0 = January
+
+            const closedItemIds = new Set(); // Track items that are closed
             const itemSet = new Set();
             let allLinesPicked = true;
             for (let i = 0; i < lineCount; i++) {
@@ -456,7 +460,62 @@ define([
                 if (itemId && fulfilledQty < quantity) {
                     itemSet.add(itemId);
                 }
+
+                const isClosed = soRec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'isclosed',
+                    line: i
+                });
+                const closed_sent = soRec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'custcol_jys_close_sent',
+                    line: i
+                });
+
+                if (isClosed === true || isClosed === 'T' && !closed_sent) {
+                    soRec.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jys_close_sent',
+                        line: i,
+                        value: true
+                    });
+                    if (itemId) {
+                        closedItemIds.add(String(itemId));
+                    }
+                }
             }
+
+            // =========================================================
+            // CLOSED LINE API CALL
+            // =========================================================
+            if (closedItemIds.size > 0) {
+
+                const tranDate = soRec.getValue({ fieldId: 'trandate' });
+
+                if (!tranDate || new Date(tranDate) <= CLOSED_SYNC_START_DATE) {
+                    // log.debug('CLOSED SYNC SKIPPED - Old Order', {
+                    //     soId: soRec.id,
+                    //     trandate: tranDate
+                    // });
+
+                } else if (tranDate && new Date(tranDate) > CLOSED_SYNC_START_DATE) {
+                  //  log.audit('CLOSED ITEMS FOUND for SOID: ' + soRec.id, Array.from(closedItemIds));
+                    const payload = {
+                        salesOrderHeaderId: soRec.id,
+                        salesOrderItemId: Array.from(closedItemIds)
+                    };
+
+                    log.audit('CLOSED ITEMS DETECTED', payload);
+
+                    const responseJson = autoLocUtil.getOrdersDUP(payload);
+
+                    if (responseJson && responseJson.length > 0) {
+                        sendClosedData(responseJson);
+                    }
+                }
+            }
+
+            // close lines logic end
 
             soRec.setValue({
                 fieldId: 'custbody_jys_wms_sync_completed',
@@ -497,25 +556,25 @@ define([
                 return true;
             });
 
-            for (let i = 0; i < lineCount; i++) {
+            for (let d = 0; d < lineCount; d++) {
 
                 const itemId = soRec.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'item',
-                    line: i
+                    line: d
                 });
 
                 const lineLocation = soRec.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'location',
-                    line: i
+                    line: d
                 });
 
                 const quantity = parseFloat(
                     soRec.getSublistValue({
                         sublistId: 'item',
                         fieldId: 'quantity',
-                        line: i
+                        line: d
                     })
                 ) || 0;
 
@@ -523,7 +582,7 @@ define([
                     soRec.getSublistValue({
                         sublistId: 'item',
                         fieldId: 'quantitypicked',
-                        line: i
+                        line: d
                     })
                 ) || 0;
 
@@ -531,7 +590,7 @@ define([
                     soRec.getSublistValue({
                         sublistId: 'item',
                         fieldId: 'quantityfulfilled',
-                        line: i
+                        line: d
                     })
                 ) || 0;
 
@@ -561,10 +620,12 @@ define([
                 soRec.setSublistValue({
                     sublistId: 'item',
                     fieldId: 'custcol_jyswms_issue',
-                    line: i,
+                    line: d,
                     value: reasonId || ''
                 });
             }
+
+
 
         } catch (e) {
             log.error('Inventory Script Error', e);
@@ -601,6 +662,40 @@ define([
         if (hasReceiving) return REASON_RECEIVING;
 
         return REASON_NA;
+    };
+
+
+
+    // =========================================================
+    // SEND CLOSED DATA
+    // =========================================================
+    const sendClosedData = (payload) => {
+
+        const token = tokenModule.generateToken();
+        if (!token) {
+            log.error('SEND CLOSED DATA - Token Failed', 'Token generation failed');
+            return;
+        }
+
+        try {
+            const response = https.post({
+                url: 'https://api.jyswms.com/update-dropship-lines?closed=true',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            return {
+                success: response.code === 200,
+                response: response.body || ''
+            };
+
+        } catch (e) {
+            log.error('SEND CLOSED DATA - ERROR', e);
+            return { success: false, error: e.message };
+        }
     };
 
     return { afterSubmit, beforeSubmit };

@@ -1,8 +1,7 @@
 /**
- * @NApiVersion 2.x
+ * @NApiVersion 2.1
  * @NModuleScope Public
  */
-
 define(['./inventoryUtils.js', '../JYSWMS_generateToken_API.js','N/log','N/https'], function (inventoryUtils, tokenModule, log, https) {
 
     function getItemInventorydata(context) {
