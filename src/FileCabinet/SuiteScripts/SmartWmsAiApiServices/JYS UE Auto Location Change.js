@@ -21,6 +21,7 @@ define([
     const REASON_RECEIVING = 3;
     const REASON_BOTH = 4;
     const REASON_OTHER_LOCATION = 5;
+    const REASON_OTHER_LOC_BULK_REC = 6;
 
     // =========================================================
     // SEND DATA
@@ -220,7 +221,9 @@ define([
                     'AND',
                     ['binnumber.custrecord_jyswms_exclude_from_inventory', 'is', 'F'],
                     'AND',
-                    ['binnumber.inactive', 'is', 'F']
+                    ['binnumber.inactive', 'is', 'F'],
+                    "AND",
+                    ["binnumber.binnumber", "isnotempty", ""]
                 ],
                 columns: ['item', 'location', 'available']
             }).run().each(result => {
@@ -291,7 +294,7 @@ define([
                 const alternateAvailable =
                     (inventoryMap[itemId][alternateLoc]) || 0;
 
-                log.debug('INVENTORY DECISION for SOID: ' + soId, {
+                log.error('INVENTORY DECISION for SOID: ' + soId, {
                     line: i,
                     itemId,
                     qtyRequired,
@@ -403,8 +406,8 @@ define([
     // BEFORE SUBMIT
     // =========================================================
     const beforeSubmit = (context) => {
-
-        if (![context.UserEventType.CREATE, context.UserEventType.EDIT].includes(context.type)) {
+        // runs on edit of sales order, checks if any lines are marked picked but not fulfilled, if so checks inventory and sets issue reason if needed. Also checks for closed lines and sends to WMS if found.
+        if (![context.UserEventType.EDIT].includes(context.type)) {
             return;
         }
 
@@ -432,8 +435,10 @@ define([
 
                 const jypickedQty = parseFloat(pickedRaw);
                 // ---- NEW LOGIC (does not impact existing behavior) ----
-                if (pickedRaw == null || pickedRaw == '' || pickedRaw == undefined) {
+                if ((pickedRaw == null || pickedRaw == '' || pickedRaw == undefined) && jypickedQty != 0) {
                     allLinesPicked = false;
+                } else if (jypickedQty >= 0) {
+                    allLinesPicked = true;
                 }
                 const itemId = soRec.getSublistValue({
                     sublistId: 'item',
@@ -472,17 +477,17 @@ define([
                     line: i
                 });
 
-                if (isClosed === true || isClosed === 'T' && !closed_sent) {
-                    soRec.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'custcol_jys_close_sent',
-                        line: i,
-                        value: true
-                    });
-                    if (itemId) {
-                        closedItemIds.add(String(itemId));
-                    }
-                }
+                // if (isClosed === true || isClosed === 'T' && !closed_sent) {
+                //     soRec.setSublistValue({
+                //         sublistId: 'item',
+                //         fieldId: 'custcol_jys_close_sent',
+                //         line: i,
+                //         value: true
+                //     });
+                //     if (itemId) {
+                //         closedItemIds.add(String(itemId));
+                //     }
+                // }
             }
 
             // =========================================================
@@ -499,18 +504,18 @@ define([
                     // });
 
                 } else if (tranDate && new Date(tranDate) > CLOSED_SYNC_START_DATE) {
-                  //  log.audit('CLOSED ITEMS FOUND for SOID: ' + soRec.id, Array.from(closedItemIds));
+                    //  log.audit('CLOSED ITEMS FOUND for SOID: ' + soRec.id, Array.from(closedItemIds));
                     const payload = {
                         salesOrderHeaderId: soRec.id,
                         salesOrderItemId: Array.from(closedItemIds)
                     };
 
-                    log.audit('CLOSED ITEMS DETECTED', payload);
+                    log.error('CLOSED ITEMS DETECTED', payload);
 
                     const responseJson = autoLocUtil.getOrdersDUP(payload);
 
                     if (responseJson && responseJson.length > 0) {
-                        sendClosedData(responseJson);
+                        // sendClosedData(responseJson);
                     }
                 }
             }
@@ -535,7 +540,9 @@ define([
                     'AND',
                     ['available', 'greaterthan', '0'],
                     'AND',
-                    ['binnumber.inactive', 'is', 'F']
+                    ['binnumber.inactive', 'is', 'F'],
+                    "AND",
+                    ["binnumber.binnumber", "isnotempty", ""]
                 ],
                 columns: ['item', 'location', 'available', 'binnumber']
             }).run().each(result => {
@@ -608,9 +615,17 @@ define([
                     const currentHasInventory = hasInventory(currentLocBins);
                     const otherHasInventory = hasInventory(otherLocBins);
 
+                    // if (!currentHasInventory && otherHasInventory) {
+                    //     reasonId = REASON_OTHER_LOCATION;
+                    // } 
                     if (!currentHasInventory && otherHasInventory) {
-                        reasonId = REASON_OTHER_LOCATION;
-                    } else if (!currentHasInventory && !otherHasInventory) {
+                        if (hasOnlyBulkOrReceiving(otherLocBins)) {
+                            reasonId = REASON_OTHER_LOC_BULK_REC;
+                        } else {
+                            reasonId = REASON_OTHER_LOCATION;
+                        }
+                    }
+                    else if (!currentHasInventory && !otherHasInventory) {
                         reasonId = REASON_NA;
                     } else {
                         reasonId = determineBinReason(currentLocBins);
@@ -649,7 +664,7 @@ define([
 
             if (binName.includes('bulk')) {
                 hasBulk = true;
-            } else if (binName.includes('receiving') || binName.includes('rt')) {
+            } else if (binName.includes('receiving') || binName.includes('rt') || binName.includes('studio')) {
                 hasReceiving = true;
             } else {
                 hasOther = true;
@@ -663,6 +678,19 @@ define([
 
         return REASON_NA;
     };
+
+    function hasOnlyBulkOrReceiving(bins) {
+        if (!bins || !bins.length) return false;
+
+        return bins.every(b =>
+            b.available > 0 &&
+            (
+                b.bin.toLowerCase().includes('bulk') ||
+                b.bin.toLowerCase().includes('receiving') ||
+                b.bin.toLowerCase().includes('studio')
+            )
+        );
+    }
 
 
 

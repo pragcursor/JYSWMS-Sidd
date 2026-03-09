@@ -24,6 +24,30 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' }) || "";
             var lineLineLocation = locationId;
             var singleIf = issingleif(recordId, salesOrderId)
+            var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
+ 
+          // if (shipVia != '57733' ) {
+          //   log.error("not a P/U order",shipVia);
+          //   return ;
+          // }
+
+
+        var customerId = newRec.getValue('custrecord_jyswms_customer_frm_so');
+
+
+          if (customerId!= '1807' && customerId != '476') {
+             log.error("not an amazon order",customerId);
+              log.error("not a P/U order",shipVia);
+            return ;
+          }
+
+         log.error("amazon order",customerId);
+
+          var trackCount = newRec.getLineCount({
+          sublistId: 'recmachcustrecord_jyswms_so_header'
+          });
+
+log.debug('amazon - Line Count', trackCount);
 
 
             if (headerPickedQty == 0 && !isPackagesUpdated) {
@@ -32,7 +56,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     type: 'customrecord_order_fulfillment_details',
                     id: recordId,
                     values: {
-                        custrecord_jyswms_total_pick_qty: totalSoQuantity
+                        custrecord_jyswms_total_pick_qty: trackCount
                     }
                 });
 
@@ -1305,7 +1329,47 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
     }
 
 
+    function beforeSubmit(context) {
+        try {
+
+            if (context.type === context.UserEventType.CREATE ||
+                context.type === context.UserEventType.EDIT) {
+
+                var rec = context.newRecord;
+
+                var soId = rec.getValue({
+                    fieldId: 'custrecord_jyswms_so_id'
+                });
+
+                var itemfulfillmentId = rec.getValue({
+                    fieldId: 'custrecord_jyswms_rel_item_ful'
+                });
+                var approved = rec.getValue({
+                    fieldId: 'custrecord_jyswms_approved'
+                });
+                if (!itemfulfillmentId && !approved) {
+                    var linecount = rec.getLineCount({
+                        sublistId: 'recmachcustrecord_jyswms_so_header'
+                    });
+
+                    rec.setValue({
+                        fieldId: 'custrecord_jyswms_total_pick_qty',
+                        value: linecount
+                    });
+                }
+
+            }
+
+        } catch (error) {
+            log.error({
+                title: "Error in beforeSubmit",
+                details: error
+            });
+        }
+    }
+
     return {
-        afterSubmit: afterSubmit
+        afterSubmit: afterSubmit,
+        beforeSubmit: beforeSubmit
     };
 });

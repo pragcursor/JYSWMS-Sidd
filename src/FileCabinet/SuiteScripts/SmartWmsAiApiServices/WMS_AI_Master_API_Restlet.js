@@ -8,7 +8,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
     './Orders/JY_so_picked_stats_EOD',
     './Items/itemUtils',
     './Inventory/inventoryUtils',
-    //'./Inventory/Jys_retriggering_items_So_data',
     './Locations/locationUtils',
     './Tracking/trackingUtils',
     './Returns/returnUtils',
@@ -19,7 +18,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
     function get(context) {
         try {
-            //  log.error("GET Request Context", context);   jysRetriggeringItemsSoData
+            //  log.error("GET Request Context", context);   iteminvmissing
 
             var action = context.action;
 
@@ -55,6 +54,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     return orderUtils.getAmzlOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
                     return orderUtils.getDropShipOrders(context, pageSize, startIndex);
+                case 'get_partaillDropShipOrders':
+                    return orderUtils.getDropShipOrders_partials(context, pageSize, startIndex);
                 case 'getDropShipOrdersPerOrder':
                     return orderUtils.getDropShipOrdersPerOrder(context, pageSize, startIndex);
                 case 'getOrdersDUP':
@@ -841,13 +842,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         value: context.portalId
                     });
                 }
-                if (context.portalId == null || context.portalId === '' || context.portalId === undefined) {
-                    return {
-                        status: 400,
-                        message: "Portal ID Missing"
-                    };
+                var excludeActions_portalId=["itemnotpicked_invchecked","sopicked_endoftheday"];
+                if (excludeActions_portalId.indexOf(context.action) === -1) {
+                    if (context.portalId == null || context.portalId === '' || context.portalId === undefined) {
+                        return {
+                            status: 400,
+                            message: "Portal ID Missing"
+                        };
+                    }
                 }
-
                 if (context.action) {
                     rec.setValue({
                         fieldId: 'custrecordwms_ai_api_custrec_action',
@@ -941,7 +944,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     response = binUtils.binTransfer(context, id);
                     break;
                 case 'itemnotpicked_invchecked':
-                    response = jysRetriggeringItemsSoData.getItemInventorydata(context.data);
+                   // log.error("itemnotpicked_invchecked - Inventory data response", JSON.stringify(context));
+                    response = inventoryUtils.getItemInventorydata(context);
                     break;
                 case 'markAsPicked':
                     // log.error("Context before markAsPicked", context);
@@ -958,7 +962,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'receiveInbound':
                     response = orderUtils.transformInboundShipmentToItemReceipt(context, id);
 
-                    log.error("Response and InboundId", "response: " + JSON.stringify(response) + ", inboundId: " + response.itemReceiptId);
+                   // log.error("Response and InboundId", "response: " + JSON.stringify(response) + ", inboundId: " + response.itemReceiptId);
 
                     var inboundId = response.itemReceiptId;
 

@@ -188,7 +188,13 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
         var isSuspended = rec.getValue({
             fieldId: 'custbody_jyswms_suspend_picking'
         });
-
+        var sostatus = rec.getValue({
+            fieldId: 'status'
+        });
+        var status_restricte = ['Closed', 'Cancelled', 'Billed'];
+        if (status_restricte.includes(sostatus)) {
+            return;
+        }
         if (isSuspended) {
             form.addButton({
                 id: 'custpage_resume_picking',

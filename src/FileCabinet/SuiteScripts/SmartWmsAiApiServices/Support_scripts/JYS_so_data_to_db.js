@@ -50,23 +50,54 @@ define(['N/log', 'N/https', '../JYSWMS_generateToken_API.js', '../Orders/orderUt
 
         if (type === context.UserEventType.EDIT) {
             var soId = rec.id;
+            
+            var jsysEnabled = rec.getValue('custbody_jys_enabled_customer');
+            if (!jsysEnabled) {
+                return;
+            }
             var tranId = rec.getValue('tranid');
             var shipaddress = rec.getValue('shipaddress');
             var oldShipAddress = oldRec.getValue('shipaddress');
-            if (shipaddress !== oldShipAddress) {
-                var logMsg = 'SO ID: ' + soId + ', Tran ID: ' + tranId + ', Old Ship Address: ' + oldShipAddress + ', New Ship Address: ' + shipaddress;
-                log.audit('Shipping Address Changed', logMsg);
+            var shipvia = rec.getValue('shipmethod');
+            var oldShipVia = oldRec.getValue('shipmethod');
+            if (shipaddress !== oldShipAddress || shipvia !== oldShipVia) {
+                var logMsg = 'SO ID: ' + soId + ', Tran ID: ' + tranId + ', Old Ship Address: ' + oldShipAddress + ', New Ship Address: ' + shipaddress + ', Old Ship Via: ' + oldShipVia + ', New Ship Via: ' + shipvia;
+                log.audit('Shipping Address or Ship Via Changed', logMsg);
 
-                var lineCount = rec.getLineCount('item');
+                var lineCount = rec.getLineCount({ sublistId: 'item' });
                 var updatedItemIds = new Set();
 
                 for (var i = 0; i < lineCount; i++) {
-                    var itemId = rec.getSublistValue('item', 'id', i);
-                    var closed = rec.getSublistValue('item', 'isclosed', i);
 
+                    var itemId = rec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'item',
+                        line: i
+                    });
+
+                    var closed = rec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'isclosed',
+                        line: i
+                    });
+
+                    var qtyFulfilled = parseFloat(rec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantityfulfilled',
+                        line: i
+                    })) || 0;
+
+                    // ✅ Skip closed lines
                     if (closed === true || closed === 'T') {
-                        continue; // Skip closed lines
+                        continue;
                     }
+
+                    // ✅ Skip fulfilled (partial or full)
+                    if (qtyFulfilled > 0) {
+                        continue;
+                    }
+
+                    // Only open & unfulfilled items
                     updatedItemIds.add(itemId);
                 }
 

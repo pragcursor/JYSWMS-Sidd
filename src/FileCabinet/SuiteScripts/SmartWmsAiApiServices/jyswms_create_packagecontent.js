@@ -25,6 +25,27 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var isAmazonUpdated = newRec.getValue('custrecord_jyswms_amzcc_updated');
             var isUpsPackageUpdated = newRec.getValue('custrecord_jswms_order_ups_packges');
             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
+            var canadaCustomerId = newRec.getValue({ fieldId: 'custrecord_jyswms_customer_frm_so' });
+
+          var status = newRec.getValue('custrecord_jyswms_order_status');
+
+          if (status == '18' || status == '17') {
+
+            if(!itemFulfill) {
+            itemFulfill =  true;
+          // isPackageUpdated = true;
+            isUpsPackageUpdated = true;
+            }
+
+          }
+
+          if (salesOrderId == "62396803") {
+
+          log.error("salesOrderId",{
+            salesOrderId: salesOrderId,
+            recordId: recordId
+          });
+          }
 
             var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
             if (donttrigger) {
@@ -33,21 +54,23 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             if (!isApproved) {
                 return;
             }
+           var locationId = "";
 
-
+if (salesOrderId) {
             var locationLookup = search.lookupFields({
                 type: search.Type.SALES_ORDER,
                 id: salesOrderId,
                 columns: ['location', 'entity']
             });
 
-            var locationId = (locationLookup.location && locationLookup.location.length)
+            locationId = (locationLookup.location && locationLookup.location.length)
                 ? locationLookup.location[0].value
                 : null;
 
-            var canadaCustomerId = (locationLookup.entity && locationLookup.entity.length)
+         canadaCustomerId = (locationLookup.entity && locationLookup.entity.length)
                 ? locationLookup.entity[0].value
                 : null;
+}
 
 
 

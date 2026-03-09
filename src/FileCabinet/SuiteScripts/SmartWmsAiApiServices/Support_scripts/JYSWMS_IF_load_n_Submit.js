@@ -64,18 +64,20 @@ define([
 
     function summarize(summary) {
 
-        log.audit('Summary', {
-            totalKeys: summary.inputSummary ? summary.inputSummary.totalKeys : 0,
-            mapErrors: summary.mapSummary.errors.iterator().hasNext()
-        });
+        // log.audit('Summary', {
+        //     totalKeys: summary.inputSummary ? summary.inputSummary.totalKeys : 0,
+        //     mapErrors: summary.mapSummary.errors.iterator().hasNext()
+        // });
 
-        summary.mapSummary.errors.iterator().each(function (key, error) {
-            log.error({
-                title: 'Map error for key: ' + key,
-                details: error
-            });
-            return true;
-        });
+        log.audit('Summary', 'complete');
+
+        // summary.mapSummary.errors.iterator().each(function (key, error) {
+        //     log.error({
+        //         title: 'Map error for key: ' + key,
+        //         details: error
+        //     });
+        //     return true;
+        // });
     }
 
     return {

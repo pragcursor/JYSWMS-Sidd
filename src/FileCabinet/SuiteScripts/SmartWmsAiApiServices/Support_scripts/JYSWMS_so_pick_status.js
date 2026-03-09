@@ -2,6 +2,7 @@
  * @NApiVersion 2.x
  * @NScriptType UserEventScript
  */
+
 define([
     'N/log',
     'N/https',
@@ -28,25 +29,18 @@ define([
             var customerId = newRecord.getValue({ fieldId: 'entity' });
             if (!customerId) return;
 
-            // Skip excluded customers
-            // if (customerId == 476 || customerId == 1807) {
-            //     return;
-            // }
-
-            // Lookup customer WMS flag
             var customerLookup = search.lookupFields({
                 type: record.Type.CUSTOMER,
                 id: customerId,
                 columns: ['custentity_jyswms_enable', 'entityid']
             });
 
-            var isEnabled = customerLookup.custentity_jyswms_enable;
-            if (!isEnabled) return;
+            if (!customerLookup.custentity_jyswms_enable) return;
 
             var customerName = customerLookup.entityid;
 
             // -----------------------------
-            // AUTO APPROVAL LOGIC
+            // AUTO APPROVAL
             // -----------------------------
 
             var approvalDone = newRecord.getValue('custbody_jyswms_approval_processed');
@@ -68,14 +62,11 @@ define([
                     }
                 });
 
-                log.audit(
-                    'Sales Order Auto Approved (' + customerName + ')',
-                    'SO ID ' + recId
-                );
+                log.audit('Sales Order Auto Approved (' + customerName + ')', 'SO ID ' + recId);
             }
 
             // -----------------------------
-            // CALL EXTERNAL API
+            // CALL WMS API
             // -----------------------------
 
             var apiResult = sendData(recId);
@@ -89,82 +80,145 @@ define([
 
             var sourceArray = [];
 
-            if (responseObj.completed && responseObj.completed.length > 0) {
+            if (responseObj.completed && responseObj.completed.length) {
                 sourceArray = responseObj.completed;
-            } else if (responseObj.notcompleted && responseObj.notcompleted.length > 0) {
+            } else if (responseObj.notcompleted && responseObj.notcompleted.length) {
                 sourceArray = responseObj.notcompleted;
             }
 
             if (!sourceArray.length || !sourceArray[0].data || !sourceArray[0].data.length) {
-                // return;
+                log.debug('No line data returned from WMS', 'SO ID ' + recId);
+                return;
             }
 
-
-
             // -----------------------------
-            // BUILD RETURN MAPS
-            // lineuniquekey → picked qty
-            // lineuniquekey → ready for pick (T/F)
-            // Collect ship errors per item
+            // MAP API RESPONSE
             // -----------------------------
 
-            var returnedMap = {};
-            var readyForPickMap = {};
-            var shipErrorMap = {}; // key → error message
+            var returnedMap = {};        // lineuniquekey → picked qty
+            var itemQtyMap = {};         // fallback
+            var readyForPickMap = {};    // lineuniquekey → ready for pick qty
             var shipErrorHeaderArray = [];
-            var jsonRetuned = 0;
-            if (sourceArray[0] && sourceArray[0].data && sourceArray[0].data.length > 0) {
-                try {
+            var dbQtyMap = {};           // NEW → quantity from API
 
-                    sourceArray[0].data.forEach(function (line) {
+            try {
 
-                        if (!line.unique_id) return;
+                // sourceArray[0].data.forEach(function (line) {
 
-                        jsonRetuned++;
+                //     if (!line.unique_id) return;
 
-                        var cleanUniqueId = line.unique_id.split('_')[0];
-                        var key = String(cleanUniqueId);
+                //     // var key = String(line.unique_id);
+                //     var key = String(line.unique_id.split('_')[0]);
 
-                        // -----------------
-                        // Picked Qty Logic
-                        // -----------------
-                        if (line.is_picked === 'picked') {
-                            returnedMap[key] = parseFloat(line.quantity) || 0;
-                        } else {
-                            returnedMap[key] = 0;
-                        }
 
-                        // -----------------
-                        // Ready For Pick Logic
-                        // -----------------
-                        readyForPickMap[key] = line.ready_for_pick === true;
+                //     // -----------------------------
+                //     // PICKED QTY
+                //     // -----------------------------
 
-                        // -----------------
-                        // Ship Error Logic
-                        // -----------------
-                        if (line.ship_error && line.ship_error !== false) {
+                //     var pickedQty = 0;
 
-                            var errorMessage = line.ship_error.toString();
+                //     if (line.is_picked === 'picked') {
+                //         pickedQty = parseFloat(line.quantity) || 0;
+                //     }
 
-                            shipErrorMap[key] = errorMessage;
+                //     if (!returnedMap[key]) {
+                //         returnedMap[key] = 0;
+                //     }
 
-                            shipErrorHeaderArray.push(
-                                errorMessage + ' for ' + line.item
-                            );
-                        }
+                //     returnedMap[key] += pickedQty;
 
-                    });
+                //     // -----------------------------
+                //     // DB QTY (FROM API quantity)
+                //     // -----------------------------
 
-                } catch (e) {
-                    log.error('Error in JSON mapping, record Id=' + recId, e);
-                }
-            } else {
-                log.debug('No data lines returned from API', 'SO ID ' + recId);
+                //     var dbQty = parseFloat(line.quantity) || 0;
+
+                //     if (!dbQtyMap[key]) {
+                //         dbQtyMap[key] = 0;
+                //     }
+
+                //     dbQtyMap[key] += dbQty;
+
+
+                //     // fallback by item
+                //     if (line.item) {
+
+                //         if (!itemQtyMap[line.item]) {
+                //             itemQtyMap[line.item] = 0;
+                //         }
+
+                //         itemQtyMap[line.item] += pickedQty;
+                //     }
+
+                //     // -----------------------------
+                //     // READY FOR PICK QTY
+                //     // -----------------------------
+
+                //     var readyQty = parseFloat(line.ready_for_pick) || 0;
+                //    // log.debug('Line Ready For Pick', 'Line ' + key + ' | Ready Qty: ' + readyQty);
+
+                //     if (!readyForPickMap[key]) {
+                //         readyForPickMap[key] = 0;
+                //     }
+
+                //     readyForPickMap[key] += readyQty;
+
+                // });
+
+                sourceArray[0].data.forEach(function (line) {
+
+                    if (!line.unique_id) return;
+
+                    // remove "_1"
+                    var key = String(line.unique_id.split('_')[0]);
+
+                    // -----------------------------
+                    // PICKED QTY
+                    // -----------------------------
+
+                    var pickedQty = 0;
+
+                    if (line.is_picked === 'picked') {
+                        pickedQty = parseFloat(line.quantity) || 0;
+                    }
+
+                    if (!returnedMap[key]) {
+                        returnedMap[key] = 0;
+                    }
+
+                    returnedMap[key] += pickedQty;
+
+                    // -----------------------------
+                    // DB QTY (FROM API quantity)
+                    // -----------------------------
+
+                    var dbQty = parseFloat(line.quantity) || 0;
+
+                    if (!dbQtyMap[key]) {
+                        dbQtyMap[key] = 0;
+                    }
+
+                    dbQtyMap[key] += dbQty;
+
+                    // -----------------------------
+                    // READY FOR PICK
+                    // -----------------------------
+
+                    var readyQty = parseFloat(line.ready_for_pick) || 0;
+
+                    if (!readyForPickMap[key]) {
+                        readyForPickMap[key] = 0;
+                    }
+
+                    readyForPickMap[key] += readyQty;
+
+                });
+            } catch (e) {
+
+                log.error('JSON Mapping Error SO ' + recId, e);
             }
-
-            // if (!Object.keys(returnedMap).length)
-            //return;
-
+            // log.debug('readyForPickMap', JSON.stringify(readyForPickMap));
+            // log.debug('readyForPickMap Keys', Object.keys(readyForPickMap));
             // -----------------------------
             // LOAD SALES ORDER
             // -----------------------------
@@ -176,6 +230,7 @@ define([
             });
 
             var lineCount = soRec.getLineCount({ sublistId: 'item' });
+
             var hasChanges = false;
 
             for (var i = 0; i < lineCount; i++) {
@@ -186,33 +241,49 @@ define([
                     line: i
                 });
 
-                if (!lineUniqueKey) continue;
+                var itemText = soRec.getSublistText({
+                    sublistId: 'item',
+                    fieldId: 'item',
+                    line: i
+                });
 
                 var key = String(lineUniqueKey);
 
-                // Only update if line exists in JSON
-                if (!returnedMap.hasOwnProperty(key)) {
 
-                    soRec.setSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'custcol_jyswms_picked_qty',
-                        line: i,
-                        value: ''
-                    });
-                    hasChanges = true;
-                    continue;
+                var newQty = 0;
+
+                // -----------------------------
+                // PRIMARY MATCH (lineuniquekey)
+                // -----------------------------
+
+                if (returnedMap.hasOwnProperty(key)) {
+
+                    newQty = returnedMap[key];
+
+                } else {
+
+                    // -----------------------------
+                    // FALLBACK MATCH (item)
+                    // -----------------------------
+
+                    if (itemQtyMap.hasOwnProperty(itemText)) {
+
+                        newQty = itemQtyMap[itemText];
+
+                        log.debug('Fallback Item Match',
+                            'Item: ' + itemText + ' | Qty: ' + newQty);
+                    }
                 }
 
-                var newQty = returnedMap[key];
-
-                var currentQty = soRec.getSublistValue({
+                var currentQtyRaw = soRec.getSublistValue({
                     sublistId: 'item',
                     fieldId: 'custcol_jyswms_picked_qty',
                     line: i
-                }) || 0;
+                });
 
-                //  if (Number(currentQty) !== Number(newQty)) 
-                {
+                var currentQty = Number(currentQtyRaw) || 0;
+
+                if (currentQtyRaw === '' || currentQtyRaw === null || Number(currentQty) !== Number(newQty)) {
 
                     soRec.setSublistValue({
                         sublistId: 'item',
@@ -223,42 +294,92 @@ define([
 
                     hasChanges = true;
 
-                    log.debug('Line Updated',
-                        'LineUniqueKey: ' + key +
-                        ' | Item: ' + soRec.getSublistText({ sublistId: 'item', fieldId: 'item', line: i }) +
-                        ' | Old: ' + currentQty +
-                        ' | New: ' + newQty
-                    );
+
+                    log.debug('Picked Qty Updated',
+                        'SO ' + recId +
+                        ' | Item ' + itemText +
+                        ' | Old ' + currentQty +
+                        ' | New ' + newQty);
                 }
 
-                // -----------------
+                // -----------------------------
                 // READY FOR PICK UPDATE
-                // -----------------
-                log.debug('Ready For Pick Check for SOID ' + recId, 'LineUniqueKey: ' + key + ' | Value: ' + readyForPickMap[key]);
+                // -----------------------------
+
                 if (readyForPickMap.hasOwnProperty(key)) {
 
-                    soRec.setSublistValue({
+                    var readyQty = readyForPickMap[key];
+
+                    var currentReadyQty = soRec.getSublistValue({
                         sublistId: 'item',
                         fieldId: 'custcol_jys_ready_for_pick',
-                        line: i,
-                        value: readyForPickMap[key]
-                    });
+                        line: i
+                    }) || 0;
 
-                    hasChanges = true;
+                    if (Number(currentReadyQty) !== Number(readyQty)) {
+
+                        soRec.setSublistValue({
+                            sublistId: 'item',
+                            fieldId: 'custcol_jys_ready_for_pick',
+                            line: i,
+                            value: readyQty
+                        });
+
+                        hasChanges = true;
+
+                        log.debug(
+                            'Ready For Pick Updated',
+                            'SO ' + recId +
+                            ' | Item ' + itemText +
+                            ' | Ready Qty ' + readyQty
+                        );
+                    }
+                }
+
+                // -----------------------------
+                // DB QTY UPDATE
+                // -----------------------------
+
+                if (dbQtyMap.hasOwnProperty(key)) {
+
+                    var dbQty = dbQtyMap[key];
+
+                    var currentDbQty = soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jys_db_qty',
+                        line: i
+                    }) || 0;
+
+                    if (Number(currentDbQty) !== Number(dbQty)) {
+
+                        soRec.setSublistValue({
+                            sublistId: 'item',
+                            fieldId: 'custcol_jys_db_qty',
+                            line: i,
+                            value: dbQty
+                        });
+
+                        hasChanges = true;
+
+                        log.debug(
+                            'DB Qty Updated',
+                            'SO ' + recId +
+                            ' | Item ' + itemText +
+                            ' | DB Qty ' + dbQty
+                        );
+                    }
                 }
             }
 
             // -----------------------------
-            // SET HEADER SHIP ERROR FIELD
+            // SHIP ERROR HEADER
             // -----------------------------
 
             if (shipErrorHeaderArray.length > 0) {
 
-                var consolidatedErrors = shipErrorHeaderArray.join(', ');
-
                 soRec.setValue({
                     fieldId: 'custbody_jys_ship_erros',
-                    value: consolidatedErrors
+                    value: shipErrorHeaderArray.join(', ')
                 });
 
             } else {
@@ -269,20 +390,8 @@ define([
                 });
             }
 
-            if (jsonRetuned != lineCount) {
-                soRec.setValue({
-                    fieldId: 'custbody_jys_wms_sync_completed',
-                    value: false
-                });
-            } else {
-                soRec.setValue({
-                    fieldId: 'custbody_jys_wms_sync_completed',
-                    value: true
-                });
-            }
-
             // -----------------------------
-            // SAVE ONLY IF CHANGED
+            // SAVE RECORD
             // -----------------------------
 
             if (hasChanges) {
@@ -292,20 +401,17 @@ define([
                     ignoreMandatoryFields: true
                 });
 
-                // log.audit('Picked quantities updated', 'SO ID ' + recId);
-
-            } else {
-                // log.debug('No changes detected — skipping save()', 'SO ID ' + recId);
+                log.audit('Sales Order Updated From WMS', 'SO ID ' + recId);
             }
 
         } catch (e) {
 
-            log.error('afterSubmit Error for SO ID ' + recId, e);
+            log.error('afterSubmit Error SO ' + recId, e);
         }
     }
 
     // -----------------------------
-    // SEND DATA TO JYS WMS API
+    // CALL WMS API
     // -----------------------------
 
     function sendData(recId) {
@@ -313,16 +419,20 @@ define([
         try {
 
             var token = tokenModule.generateToken();
+
             if (!token) {
                 return { success: false, error: 'Token generation failed' };
             }
 
             var response = https.get({
+
                 url: 'https://api.jyswms.com/dropship-sales-order-status?sales_order_id=' + recId,
+
                 headers: {
                     'Authorization': 'Bearer ' + token,
                     'Content-Type': 'application/json'
                 }
+
             });
 
             return {
@@ -344,4 +454,5 @@ define([
     return {
         afterSubmit: afterSubmit
     };
+
 });
