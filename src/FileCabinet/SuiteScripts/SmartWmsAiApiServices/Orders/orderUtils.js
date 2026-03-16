@@ -4,19 +4,7 @@
  */
 define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (record, file, search, log, runtime) {
 
-    //  return {
-    //     getOrders: getOrders,
-    //     getDropShipOrders: getDropShipOrders,
-    //     dropShipmentData:dropShipmentData,
-    //     fullFillOrders: fullFillOrders,
-    //     getFullFillOrders: getFullFillOrders,
-    //     getInboundRecords: getInboundRecords,
-    //     transformInboundShipmentToItemReceipt:transformInboundShipmentToItemReceipt,
-    //     getLTLOrders:getLTLOrders,
-    //     getUnpicked : getUnpicked,
-    //     processPalletUpdate : processPalletUpdate,
-    //     createImageFile:createImageFile
-    // };
+
     function getDropShipOrdersPerOrder(context, pageSize, startIndex) {
         try {
 
@@ -35,7 +23,6 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             if (context.start_date && context.end_date) {
                 filters.push('AND', ['trandate', 'within', context.start_date, context.end_date]);
             }
-
 
             var headerSearch = search.load({ id: 4797 });
 
@@ -116,7 +103,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                 itemSearch.filters = (itemSearch.filters || []).concat(filters);
             }
 
-            log.error("itemSearch - -filters", itemSearch.filters)
+            // log.error("itemSearch - -filters", itemSearch.filters)
 
             var cartonsIds = {}; // carton counter per internalID
             // var itemSearchResult = itemSearch.run();
@@ -715,7 +702,20 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
         try {
             const palletSC = '';
             let salesorderSearch;
-
+            var excludeorders = [
+                "63055615",
+                "63056554",
+                "63057248",
+                "63057850",
+                "63058450",
+                "63058879",
+                "63058918",
+                "63059619",
+                "63060152",
+                "63061706",
+                "63061893",
+                "63062668"
+            ];
             if (!palletSC) {
                 salesorderSearch = search.create({
                     type: search.Type.SALES_ORDER,
@@ -726,17 +726,21 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                         "AND",
                         ["custbody_reason_approval", "doesnotcontain", "PARTS"],
                         "AND",
-                        ["customer.custentity_jyswms_enable", "is", "T"],
-                        "AND",
                         ["location", "anyof", "15", "9"],
+                        "AND",
+                        ["customer.custentity_jyswms_enable", "is", "T"],
                         "AND",
                         ["custbody_bol_tracking_number", "isempty", ""],
                         "AND",
                         ["shipmethod", "anyof", "57733"],
                         "AND",
-                        ["status", "noneof", "SalesOrd:A", "SalesOrd:C", "SalesOrd:H"],
+                        ["status", "noneof", "SalesOrd:C", "SalesOrd:H", "SalesOrd:A"],
                         "AND",
-                        ["shipdate", "onorafter", "1/1/2026"]
+                        ["shipdate", "onorafter", "12/1/2025"],
+                        "AND",
+                        ["customer.custentity_jyswms_suspended", "is", "F"],
+                        "AND",
+                        [["customer.custentity_wms_ltl_customer", "is", "T"], "OR", ["name", "anyof", "476", "1807"]]
                     ],
                     columns: [
                         search.createColumn({ name: "internalid", summary: "GROUP" }),
@@ -1111,7 +1115,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
        */
 
 
-    function createImageFile(data) {
+    function createImageFile(data, id) {
         try {
 
             var fileName = data.fileName || '';
@@ -1201,6 +1205,23 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                     isDynamic: false
                 });
 
+
+                customRec.setValue({
+                    fieldId: 'custrecord_jyswms_approved',
+                    value: true
+                });
+
+                customRec.setValue({
+                    fieldId: 'custrecord_jyswms_is_partially_fulfilled',
+                    value: true
+                });
+
+                customRec.setValue({
+                    fieldId: 'custrecord_jyswmws_perform_update',
+                    value: true
+                });
+
+
                 customRec.save({
                     enableSourcing: false,
                     ignoreMandatoryFields: true
@@ -1208,6 +1229,31 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
 
                 log.error('Custom Record Updated', 'CustomRec ID: ' + customrecId);
             }
+
+
+            if (id && salesOrderId) {
+                try {
+                    record.submitFields({
+                        type: 'customrecord_wms_ai_api_custom_rec',
+                        id: id,
+                        values: {
+                            custrecord_jyswms_related_tran_record: salesOrderId,
+                            custrecord_wms_ai_api_custrec_rel_name: bolNumber
+                        },
+                        options: {
+                            enableSourcing: false,
+                            ignoreMandatoryFields: true
+                        }
+                    });
+                } catch (e) {
+                    log.error({
+                        title: 'Error updating custom record',
+                        details: e
+                    });
+                }
+            }
+
+
 
             return {
                 success: true,
@@ -1227,89 +1273,6 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
         }
     }
 
-    // function createImageFile(data) {
-    //     try {
-
-    //         const fileName = data.fileName || '';
-    //         const fileType = data.fileType || file.Type.JPGIMAGE;
-    //         const folderId = data.folderId || 11865;//762; //11895; 11865// default folder
-    //         const base64Data = data.fileContent;
-    //         const bolNumber = data.bolNumber || '';
-
-    //         var salesOrderId = data.internalId || '';
-
-    //         log.error("salesOrderId", salesOrderId);
-
-    //         if (!base64Data) {
-    //             return { success: false, message: 'Missing file content (fileContent)' };
-    //         }
-
-    //         // // Construct final filename (prefix with BOL number if provided)
-    //         // const finalFileName = bolNumber
-    //         //     ? `${bolNumber}_${fileName}`
-    //         //     : fileName;
-    //         var finalFileName = "SOID_" + salesOrderId;
-    //         // Create the file in File Cabinet
-    //         const imageFile = file.create({
-    //             name: finalFileName,
-    //             fileType: fileType,
-    //             contents: base64Data,
-    //             folder: folderId,
-    //             isOnline: true
-    //         });
-
-    //         const fileId = imageFile.save();
-
-    //         // Load the file to get its URL
-    //         const savedFile = file.load({ id: fileId });
-
-    //         //   var amzccIds =  getCustomRecordIdsBySalesOrder(salesOrderId);
-
-    //         //    if (amzccIds && amzccIds.length > 0){
-    //         //     for (var i=0; i<amzccIds.length; i++) {
-
-
-    //         //     }
-    //         //    }
-
-    //         if (salesOrderId && fileId) {
-    //             // Update 3 custom fields on the Sales Order
-    //             record.submitFields({
-    //                 type: record.Type.SALES_ORDER,
-    //                 id: salesOrderId,
-    //                 values: {
-    //                     custbody_bol_tracking_number: data.bolNumber, // bol number
-    //                     custbody35: data.palletCount, // total pallet count
-    //                     custbody_wms_bol_tracking_image: fileId,
-    //                     custbody_wms_current_picked_qty: data.palletCount
-    //                 },
-    //                 options: {
-    //                     enableSourcing: false,
-    //                     ignoreMandatoryFields: true
-    //                 }
-    //             });
-
-    //             log.debug('Sales Order Updated', 'Updated 3 custom fields for SO ID: ' + salesOrderId);
-    //         }
-    //         else {
-    //             log.error('Missing Sales Order ID', 'salesOrderId not provided');
-    //         }
-
-    //         return {
-    //             success: true,
-    //             message: 'File uploaded successfully',
-    //             fileId: fileId,
-    //             fileName: savedFile.name,
-    //             url: savedFile.url
-    //         };
-
-    //     }
-    //     catch (error) {
-    //         log.error('File Upload Error', error);
-    //         return { success: false, message: error.message || error };
-
-    //     }
-    // }
 
 
     function getCustomRecordIdsBySalesOrder(salesorderId) {
@@ -4581,6 +4544,11 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
 
                 try {
 
+
+                    // Remove all saved search filters
+                    // itemSearch.filters = [];
+                    // var itemfilters = [];
+
                     itemfilters.push(search.createFilter({
 
                         name: 'internalid',
@@ -4590,6 +4558,23 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                         values: headerIds
 
                     }));
+
+                    // itemfilters.push(search.createFilter({
+                    //     name: 'mainline',
+                    //     operator: search.Operator.IS,
+                    //     values: false
+                    // }));
+                    // itemfilters.push(search.createFilter({
+                    //     name: 'taxline',
+                    //     operator: search.Operator.IS,
+                    //     values: false
+                    // }));
+                    // itemfilters.push(search.createFilter({
+                    //     name: 'shippingline',
+                    //     operator: search.Operator.IS,
+                    //     values: false
+                    // }));
+
 
 
                 } catch (e) {
@@ -4601,8 +4586,12 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                 }
 
             }
+            // else {
+            //     var itemfilters = itemSearch.filters || [];
+            // }
 
             itemSearch.filters = itemfilters;
+            log.error("itemSearch.filters", JSON.stringify(itemSearch.filters));
 
             if (filters.length > 0) {
                 itemSearch.filters = (itemSearch.filters || []).concat(filters);
@@ -6074,6 +6063,296 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
         return adj.save();
     }
 
+    /**
+     * below function is added by sidd to use in userevents dont touch this.
+     * Optimized Drop Ship Order Retrieval
+     * Optimized for small number of Sales Orders
+     */
+
+    function getDropShipOrders_helperfunction(context, pageSize, startIndex) {
+
+        try {
+
+            var scriptObj = runtime.getCurrentScript();
+
+            var headerSearch = search.load({ id: 4797 });
+
+            var filters = [];
+
+            if (context.salesOrderHeaderId) {
+                filters.push(search.createFilter({
+                    name: "internalid",
+                    operator: search.Operator.ANYOF,
+                    values: context.salesOrderHeaderId
+                }));
+            }
+
+            if (filters.length) {
+                headerSearch.filters = (headerSearch.filters || []).concat(filters);
+            }
+
+            var headerResults = headerSearch.run().getRange({
+                start: startIndex || 0,
+                end: (startIndex || 0) + (pageSize || 100)
+            });
+
+            var headerData = {};
+            var headerIds = [];
+
+            headerResults.forEach(function (result) {
+
+                var internalId = result.getValue({ name: "internalid" });
+
+                headerIds.push(internalId);
+
+                var recordData = {};
+
+                result.columns.forEach(function (column) {
+
+                    var columnName = toSnakeCase(column.label || column.name);
+
+                    recordData[columnName] =
+                        result.getText(column) || result.getValue(column);
+
+                });
+
+                recordData.itemDetails = [];
+
+                headerData[internalId] = recordData;
+
+            });
+
+            /**
+             * Item Search
+             */
+
+            var itemSearch = search.load({ id: 4798 });
+
+            if (headerIds.length) {
+
+                itemSearch.filters.push(search.createFilter({
+                    name: "internalid",
+                    operator: search.Operator.ANYOF,
+                    values: headerIds
+                }));
+
+            }
+
+            var itemResults = itemSearch.run().getRange({
+                start: 0,
+                end: 1000
+            });
+
+            var cartonsIds = {};
+
+            itemResults.forEach(function (result) {
+
+                var internalId = result.getValue({ name: "internalid" });
+
+                if (!headerData[internalId]) return;
+
+                if (!cartonsIds[internalId]) cartonsIds[internalId] = 1;
+
+                var baseItemData = {};
+
+                var lineQuantityRaw = 0;
+
+                var parsedSoItemsArr = [];
+
+                var so_items_str = "";
+
+                var item_internalid = result.getValue({ name: "item" });
+
+                var unique_id_val = "";
+
+                result.columns.forEach(function (column) {
+
+                    var columnName = toSnakeCase(column.label || column.name);
+
+                    var valueText = result.getText(column) || result.getValue(column);
+
+                    if (columnName === "quantity") {
+
+                        lineQuantityRaw = parseInt(valueText) || 0;
+
+                    }
+
+                    if (columnName === "so_items") {
+
+                        so_items_str = valueText || "";
+
+                        if (so_items_str) {
+
+                            parsedSoItemsArr = so_items_str
+                                .split(";")
+                                .map(function (s) { return s.trim(); })
+                                .filter(function (s) { return s.length > 0; });
+
+                        }
+
+                        baseItemData["so_items"] = parsedSoItemsArr.length;
+
+                    }
+
+                    else if (columnName === "unique_id") {
+
+                        unique_id_val = valueText || "";
+
+                        baseItemData["unique_id"] = valueText || "";
+
+                    }
+
+                    else if (columnName === "ship_via") {
+
+                        baseItemData["shipMethodText"] = result.getText(column);
+
+                        baseItemData["shipMethodValue"] = result.getValue(column);
+
+                    }
+
+                    else if (columnName === "item_types") {
+
+                        var typeValue = (valueText || "").toLowerCase().trim();
+
+                        if (typeValue === "rug") {
+
+                            baseItemData["item_types"] = "Rug";
+
+                        } else if (
+                            typeValue === "box" ||
+                            typeValue === "small" ||
+                            typeValue === "boxes"
+                        ) {
+
+                            baseItemData["item_types"] = "Box";
+
+                        } else if (typeValue === "oversize") {
+
+                            baseItemData["item_types"] = "Oversize";
+
+                        } else {
+
+                            baseItemData["item_types"] = "";
+
+                        }
+
+                    }
+
+                    else {
+
+                        baseItemData[columnName] = valueText;
+
+                    }
+
+                });
+
+                /**
+                 * Bin transfer logic
+                 */
+
+                var existBinArr = getBinTransferinfo(result, itemPrimaryUnits());
+
+                if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
+
+                    existBinArr = [{
+                        internalId: "",
+                        binId: "",
+                        binNumber: "",
+                        relatedSalesOrder: "",
+                        item: "",
+                        quantity: "",
+                        binIndex: ""
+                    }];
+
+                }
+
+                if (!headerData[internalId]._addedKeys)
+                    headerData[internalId]._addedKeys = {};
+
+                for (var b = 0; b < existBinArr.length; b++) {
+
+                    var binObj = existBinArr[b];
+
+                    var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
+
+                    if (headerData[internalId]._addedKeys[uniqueKey]) continue;
+
+                    headerData[internalId]._addedKeys[uniqueKey] = true;
+
+                    var itemData = Object.assign({}, baseItemData);
+
+                    var uniqueIdToSet = unique_id_val
+                        ? unique_id_val + "_" + (binObj.binIndex || (b + 1))
+                        : item_internalid + "_" + (binObj.binIndex || (b + 1));
+
+                    itemData["unique_id"] = uniqueIdToSet;
+
+                    itemData["quantity"] = parseInt(binObj.quantity || lineQuantityRaw);
+
+                    itemData["bin_id"] = binObj.binId || "";
+
+                    itemData["bin_index"] = binObj.binIndex || "";
+
+                    itemData["bin_name"] = binObj.binNumber || "";
+
+                    itemData["bin_transfer_internalid"] = binObj.internalId || "";
+
+                    headerData[internalId].itemDetails.push(itemData);
+
+                }
+
+            });
+
+            /**
+             * Remove internal tracking key
+             */
+
+            Object.keys(headerData).forEach(function (id) {
+
+                delete headerData[id]._addedKeys;
+
+            });
+
+            return {
+
+                status: 200,
+
+                message: "Data retrieved successfully",
+
+                summary: {
+
+                    total_records: headerIds.length,
+
+                    records_per_page: pageSize,
+
+                    current_page: Math.floor(startIndex / pageSize) + 1
+
+                },
+
+                data: headerData
+
+            };
+
+        }
+
+        catch (e) {
+
+            log.error("Error in getDropShipOrders", e);
+
+            return {
+
+                status: 500,
+
+                message: e.message
+
+            };
+
+        }
+
+    }
+
+
+
 
 
 
@@ -6093,6 +6372,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
         processPalletUpdate: processPalletUpdate,
         createImageFile: createImageFile,
         processInbound: processInbound,
-        getDropShipOrders_partials: getDropShipOrders_partials
+        getDropShipOrders_partials: getDropShipOrders_partials,
+        getDropShipOrders_helperfunction: getDropShipOrders_helperfunction
     };
 });

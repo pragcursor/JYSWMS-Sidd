@@ -25,29 +25,43 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var lineLineLocation = locationId;
             var singleIf = issingleif(recordId, salesOrderId)
             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
- 
-          // if (shipVia != '57733' ) {
-          //   log.error("not a P/U order",shipVia);
-          //   return ;
-          // }
+
+            // if (shipVia != '57733' ) {
+            //   log.error("not a P/U order",shipVia);
+            //   return ;
+            // }
 
 
-        var customerId = newRec.getValue('custrecord_jyswms_customer_frm_so');
+            var customerId = newRec.getValue('custrecord_jyswms_customer_frm_so');
+
+            var customerLookup = search.lookupFields({
+                type: search.Type.CUSTOMER,
+                id: customerId,
+                columns: ['custentity_wms_ltl_customer']
+            });
+            var ltlCustomer = customerLookup.custentity_wms_ltl_customer;
 
 
-          if (customerId!= '1807' && customerId != '476') {
-             log.error("not an amazon order",customerId);
-              log.error("not a P/U order",shipVia);
-            return ;
-          }
+            // if (!ltlCustomer || (customerId !== '1807' && customerId !== '476')) {
+            //     log.error("not an amazon order", customerId);
+            //     log.error("not a P/U order", shipVia);
+            //     return;
+            // }
 
-         log.error("amazon order",customerId);
+            var allowedCustomers = ['1807', '476'];
 
-          var trackCount = newRec.getLineCount({
-          sublistId: 'recmachcustrecord_jyswms_so_header'
-          });
+            if (!ltlCustomer && !allowedCustomers.includes(customerId)) {
+                log.debug("Skipping record", customerId);
+                return;
+            }
 
-log.debug('amazon - Line Count', trackCount);
+            log.error("amazon order", customerId);
+
+            var trackCount = newRec.getLineCount({
+                sublistId: 'recmachcustrecord_jyswms_so_header'
+            });
+
+            log.debug('amazon - Line Count', trackCount);
 
 
             if (headerPickedQty == 0 && !isPackagesUpdated) {

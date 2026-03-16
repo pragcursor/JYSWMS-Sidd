@@ -14,7 +14,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', '/SuiteScripts/SmartWmsAiApi
       var startIndex = 0;
       log.audit("salesOrderHeaderId",payLoad);
         if (salesOrderId) {
-            var OrderData = orderUtils.getDropShipOrders(payLoad, pageSize, startIndex);
+            var OrderData = orderUtils.getDropShipOrders_helperfunction(payLoad, pageSize, startIndex);
             log.debug('OrderData', JSON.stringify(OrderData));
 
         }

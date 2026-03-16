@@ -13,8 +13,7 @@ define([
 
     function afterSubmit(context) {
 
-        if (context.type !== context.UserEventType.CREATE &&
-            context.type !== context.UserEventType.EDIT) {
+        if (context.type !== context.UserEventType.EDIT) {
             return;
         }
 
@@ -76,7 +75,16 @@ define([
                 return;
             }
 
-            var responseObj = JSON.parse(apiResult.response || '{}');
+            // var responseObj = JSON.parse(apiResult.response || '{}');
+
+            var responseObj;
+
+            try {
+                responseObj = JSON.parse(apiResult.response || '{}');
+            } catch (e) {
+                log.error('Invalid JSON Response', apiResult.response);
+                return;
+            }
 
             var sourceArray = [];
 

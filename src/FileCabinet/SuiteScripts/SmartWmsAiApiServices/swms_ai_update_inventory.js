@@ -15,7 +15,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                 let itemIds = [];
                 let recId, recType, rec;
 
-               if (context.type === context.UserEventType.DELETE) {
+                if (context.type === context.UserEventType.DELETE) {
 
                     recId = context.oldRecord.id;
                     recType = context.oldRecord.type;
@@ -25,12 +25,12 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
 
                     if (ITEM_TYPES.includes(recType)) {
                         itemIds.push(recId.toString());
-                    } 
-                  else if (recType == 'itemreceipt'){
-                    
-                    log.error("itemreceipt - (Delete)", { recId, recType });
-                      itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
-                    
+                    }
+                    else if (recType == 'itemreceipt') {
+
+                        log.error("itemreceipt - (Delete)", { recId, recType });
+                        itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
+
                     }
                     else {
                         itemIds = collectItemIdsFromSublist(recId, recType, 'inventory', 'item', rec);
@@ -44,24 +44,25 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                     // //log.debug("Record Info (CREATE/EDIT)", { recId, recType });
 
                     if (ITEM_TYPES.includes(recType)) {
-                        let oldRec = context.oldRecord;
-                        let newRec = context.newRecord;
+                        // let oldRec = context.oldRecord;
+                        // let newRec = context.newRecord;
 
-                        let oldL41 = oldRec.getValue({ fieldId: 'custitem_l41_inventory_on_hand' });
-                        let oldL60 = oldRec.getValue({ fieldId: 'custitem_l60_inventory_on_hand' });
-                        let newL41 = newRec.getValue({ fieldId: 'custitem_l41_inventory_on_hand' });
-                        let newL60 = newRec.getValue({ fieldId: 'custitem_l60_inventory_on_hand' });
+                        // let oldL41 = oldRec.getValue({ fieldId: 'custitem_l41_inventory_on_hand' });
+                        // let oldL60 = oldRec.getValue({ fieldId: 'custitem_l60_inventory_on_hand' });
+                        // let newL41 = newRec.getValue({ fieldId: 'custitem_l41_inventory_on_hand' });
+                        // let newL60 = newRec.getValue({ fieldId: 'custitem_l60_inventory_on_hand' });
 
-                        if (oldL41 !== newL41 || oldL60 !== newL60) {
+                        // if (oldL41 !== newL41 || oldL60 !== newL60)
+                        {
                             ////log.debug("Inventory Changed", { recId });
                             itemIds.push(recId.toString());
                         }
-                        return;
-                    } 
-                    
-                   else if (recType === 'itemreceipt'){
-                       log.error("itemreceipt - (CREATE/EDIT)", { recId, recType });
-                      itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
+                       // return;
+                    }
+
+                    else if (recType === 'itemreceipt') {
+                        log.error("itemreceipt - (CREATE/EDIT)", { recId, recType });
+                        itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
 
                     }
                     else {

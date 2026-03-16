@@ -191,6 +191,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
         var sostatus = rec.getValue({
             fieldId: 'status'
         });
+        
         var status_restricte = ['Closed', 'Cancelled', 'Billed'];
         if (status_restricte.includes(sostatus)) {
             return;

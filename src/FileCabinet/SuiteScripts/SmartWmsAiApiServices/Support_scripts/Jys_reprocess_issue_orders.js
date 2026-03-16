@@ -573,6 +573,17 @@ define([
                 isDynamic: true
             });
 
+            var customerId = fulfillmentRec.getValue({ fieldId: 'entity' });
+
+            var isLowesCustomer = false;
+
+            // Replace these with your actual Lowe's customer IDs
+            var LOWES_CUSTOMERS = [1952, 639];
+
+            if (LOWES_CUSTOMERS.indexOf(Number(customerId)) !== -1) {
+                isLowesCustomer = true;
+            }
+
             var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
 
             var existingCount = fulfillmentRec.getLineCount({ sublistId: sublistId });
@@ -616,6 +627,16 @@ define([
                         fieldId: 'custrecordhj_ucc',
                         value: line.SSCC
                     });
+                }
+
+                if (isLowesCustomer && line.SSCC) {
+
+                    fulfillmentRec.setCurrentSublistValue({
+                        sublistId: sublistId,
+                        fieldId: 'custrecordhj_ucc',
+                        value: line.SSCC
+                    });
+
                 }
 
                 fulfillmentRec.setCurrentSublistValue({
@@ -922,20 +943,39 @@ define([
         var existingTracking = {};
 
         try {
-            log.debug('Checking Existing Tracking Numbers', trackingNumbers);
+
             if (!trackingNumbers || !trackingNumbers.length) {
                 return existingTracking;
             }
 
+            var filters = [
+                ["type", "anyof", "ItemShip"],
+                "AND",
+                ["mainline", "is", "T"],
+                "AND"
+            ];
+
+            var trackingFilter = [];
+
+            trackingNumbers.forEach(function (num, index) {
+
+                if (index > 0) {
+                    trackingFilter.push("OR");
+                }
+
+                trackingFilter.push([
+                    "shipmentpackage.trackingnumber",
+                    "is",
+                    num
+                ]);
+
+            });
+
+            filters = filters.concat(trackingFilter);
+
             var fulfillmentSearch = search.create({
                 type: "itemfulfillment",
-                filters: [
-                    ["type", "anyof", "ItemShip"],
-                    "AND",
-                    ["shipmentpackage.trackingnumber", "is", trackingNumbers],
-                    "AND",
-                    ["mainline", "is", "T"]
-                ],
+                filters: filters,
                 columns: [
                     search.createColumn({
                         name: "trackingnumber",
@@ -956,7 +996,6 @@ define([
                 }
 
                 return true;
-
             });
 
         } catch (e) {
@@ -967,6 +1006,57 @@ define([
 
         return existingTracking;
     }
+
+    // function getExistingTrackingNumbers(trackingNumbers) {
+
+    //     var existingTracking = {};
+
+    //     try {
+    //         log.debug('Checking Existing Tracking Numbers', trackingNumbers);
+    //         if (!trackingNumbers || !trackingNumbers.length) {
+    //             return existingTracking;
+    //         }
+
+    //         var fulfillmentSearch = search.create({
+    //             type: "itemfulfillment",
+    //             filters: [
+    //                 ["type", "anyof", "ItemShip"],
+    //                 "AND",
+    //                 ["shipmentpackage.trackingnumber", "is", trackingNumbers],
+    //                 "AND",
+    //                 ["mainline", "is", "T"]
+    //             ],
+    //             columns: [
+    //                 search.createColumn({
+    //                     name: "trackingnumber",
+    //                     join: "shipmentpackage"
+    //                 })
+    //             ]
+    //         });
+
+    //         fulfillmentSearch.run().each(function (result) {
+
+    //             var tracking = result.getValue({
+    //                 name: "trackingnumber",
+    //                 join: "shipmentpackage"
+    //             });
+
+    //             if (tracking) {
+    //                 existingTracking[String(tracking)] = true;
+    //             }
+
+    //             return true;
+
+    //         });
+
+    //     } catch (e) {
+
+    //         log.error('Error Fetching Existing Tracking Numbers', e);
+
+    //     }
+
+    //     return existingTracking;
+    // }
 
     function buildForm(context) {
 

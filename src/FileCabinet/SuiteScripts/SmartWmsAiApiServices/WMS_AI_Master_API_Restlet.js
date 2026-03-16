@@ -21,6 +21,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             //  log.error("GET Request Context", context);   iteminvmissing
 
             var action = context.action;
+            // try {
+            //     var previousRecordId = context.previous_record_id || "";
+
+            // } catch (error) {
+            //     log.error("Error parsing previous_record_id", error);
+            //     var previousRecordId = "";
+            // }
+
 
             // var id ='';
             if (!action) {
@@ -53,13 +61,13 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'get_amzlOrders':
                     return orderUtils.getAmzlOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
-                    return orderUtils.getDropShipOrders(context, pageSize, startIndex);
+                    return orderUtils.getDropShipOrders(context, pageSize, startIndex); //orderUtils.getDropShipOrders(context, pageSize, startIndex);
                 case 'get_partaillDropShipOrders':
                     return orderUtils.getDropShipOrders_partials(context, pageSize, startIndex);
                 case 'getDropShipOrdersPerOrder':
                     return orderUtils.getDropShipOrdersPerOrder(context, pageSize, startIndex);
                 case 'getOrdersDUP':
-                    return orderUtils.getOrdersDUP(context, pageSize, startIndex);
+                    return orderUtils.getDropShipOrders_helperfunction(context, pageSize, startIndex);  //getDropShipOrders_helperfunction
                 case 'get_UnpickedOrders':
                     return orderUtils.getUnpicked(context, pageSize, startIndex);
                 case 'getItemSalesPerCustomer':
@@ -87,7 +95,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'get_shippingLineData':
                     return trackingUtils.getShippingLineData(context, pageSize, startIndex);
                 case 'get_inventory':
-                    return inventoryUtils.getInventory(context, pageSize, startIndex);
+                    return inventoryUtils.processAllItems(context, pageSize, startIndex); // getInventory(context, pageSize, startIndex);processAllItems processAllItems
                 case 'get_fullfillOrders':
                     return orderUtils.getFullFillOrders(context, pageSize, startIndex);
                 case 'get_binInventoryDetail':
@@ -842,7 +850,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         value: context.portalId
                     });
                 }
-                var excludeActions_portalId=["itemnotpicked_invchecked","sopicked_endoftheday"];
+                var excludeActions_portalId = ["itemnotpicked_invchecked", "sopicked_endoftheday"];
                 if (excludeActions_portalId.indexOf(context.action) === -1) {
                     if (context.portalId == null || context.portalId === '' || context.portalId === undefined) {
                         return {
@@ -944,7 +952,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     response = binUtils.binTransfer(context, id);
                     break;
                 case 'itemnotpicked_invchecked':
-                   // log.error("itemnotpicked_invchecked - Inventory data response", JSON.stringify(context));
+                    // log.error("itemnotpicked_invchecked - Inventory data response", JSON.stringify(context));
                     response = inventoryUtils.getItemInventorydata(context);
                     break;
                 case 'markAsPicked':
@@ -962,7 +970,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'receiveInbound':
                     response = orderUtils.transformInboundShipmentToItemReceipt(context, id);
 
-                   // log.error("Response and InboundId", "response: " + JSON.stringify(response) + ", inboundId: " + response.itemReceiptId);
+                    // log.error("Response and InboundId", "response: " + JSON.stringify(response) + ", inboundId: " + response.itemReceiptId);
 
                     var inboundId = response.itemReceiptId;
 
@@ -3075,8 +3083,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     }
 
-
-
                     itemRec.setValue({ fieldId: 'custrecord_jyswms_item_uniqueid', value: uniqueId });
                     itemRec.setValue({ fieldId: 'custrecord_jyswms_item_portal_id', value: portalId });
                     itemRec.setValue({ fieldId: 'custrecord_jyswms_item_picker_name', value: pickerName });
@@ -3275,9 +3281,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         custrecord_jyswms_total_pick_qty: totalPickedQty
                     };
 
-                    if (isSingleIf == true || isSingleIf == 'T') {
-                        updateValues.custrecord_jyswms_approved = isApproved;
-                    }
+                    //    if (isSingleIf == true || isSingleIf == 'T') {
+                    updateValues.custrecord_jyswms_approved = true;
+                    //    }
 
                     log.error('Header Totals and Approval', {
                         totalSOQty: totalSOQty,
@@ -4119,9 +4125,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         custrecord_jyswms_total_pick_qty: totalPickedQty
                     };
 
-                    if (isSingleIf == true || isSingleIf == 'T') {
-                        updateValues.custrecord_jyswms_approved = isApproved;
-                    }
+                  if (isSingleIf == true || isSingleIf == 'T') {
+                        updateValues.custrecord_jyswms_approved = true;
+                   }
 
                     log.error('Header Totals and Approval', {
                         totalSOQty: totalSOQty,

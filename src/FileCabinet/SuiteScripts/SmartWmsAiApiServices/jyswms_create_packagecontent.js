@@ -27,29 +27,47 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
             var canadaCustomerId = newRec.getValue({ fieldId: 'custrecord_jyswms_customer_frm_so' });
 
-          var status = newRec.getValue('custrecord_jyswms_order_status');
+             var status = newRec.getValue('custrecord_jyswms_order_status');
+   
+          // if (status == '18' || status == '17') {
 
-          if (status == '18' || status == '17') {
+          //   if(!itemFulfill) {
+          //   itemFulfill =  true;
+          // // isPackageUpdated = true;
+          //   isUpsPackageUpdated = true;
+          //   }
 
-            if(!itemFulfill) {
-            itemFulfill =  true;
-          // isPackageUpdated = true;
-            isUpsPackageUpdated = true;
-            }
+          // }
+        
 
-          }
+        //   if (salesOrderId != "62919500") {
 
-          if (salesOrderId == "62396803") {
+            
+        // log.debug("salesOrderId ",{
+        //     salesOrderId: salesOrderId,
+        //     recordId: recordId
+        //   });
 
-          log.error("salesOrderId",{
+          //   return;
+          // }
+
+          if (!carrierProNumber && shipVia == '57733') {
+
+          log.debug("salesOrderId -- no carrier",{
             salesOrderId: salesOrderId,
             recordId: recordId
           });
+            return;
           }
 
             var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
-            if (donttrigger) {
-                return;
+            if (donttrigger && carrierProNumber) {
+                 log.debug("salesOrderId --donttrigger",{
+            salesOrderId: salesOrderId,
+            recordId: recordId
+          });
+
+              //salesOrderId = "62919500";
             }
             if (!isApproved) {
                 return;

@@ -380,7 +380,7 @@ define([
 
                 //  log.audit('CALLING DUP API for SOID: ' + soId, payload);
 
-                const responseJson = autoLocUtil.getOrdersDUP(payload);
+                const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload);
 
                 if (responseJson && responseJson.length > 0) {
                     sendData(responseJson);
@@ -388,7 +388,7 @@ define([
             }
 
         } catch (error) {
-            log.error('AFTER SUBMIT ERROR for SOID: ' + soId, error);
+            log.error('AFTER SUBMIT ERROR for SOID: ' +  error);
         }
     };
 
@@ -416,6 +416,14 @@ define([
             const soRec = context.newRecord;
             const isEnabled = soRec.getValue('custbody_jys_enabled_customer');
             if (!isEnabled) return;
+
+            const status = soRec.getValue('status');
+            if (['Closed', 'Cancelled', 'Billed'].includes(status)) {
+                soRec.setValue({
+                    fieldId: 'custbody_jyswms_fufilment_error',
+                    value: ''
+                });
+            }
 
             const lineCount = soRec.getLineCount({ sublistId: 'item' });
             if (!lineCount) return;
@@ -512,7 +520,7 @@ define([
 
                     log.error('CLOSED ITEMS DETECTED', payload);
 
-                    const responseJson = autoLocUtil.getOrdersDUP(payload);
+                    const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload);
 
                     if (responseJson && responseJson.length > 0) {
                         // sendClosedData(responseJson);

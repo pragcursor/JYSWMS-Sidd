@@ -17,32 +17,46 @@ define(['N/record', 'N/https', 'N/log'],
 
                 var sales_id = body.salesOrderId;     // Sales Order ID
                 var suspended = body.suspendPicking; // true / false
+                var shipVia = body.shipVia;           // Shipping Method (optional, can be used for additional logic if needed)
                 var entityType = 'salesorder';
 
                 if (!sales_id) {
                     throw 'Missing Sales Order ID';
                 }
+                log.audit('Received Request', 'Sales Order ID: ' + sales_id + ', Suspend: ' + suspended + ', Ship Via: ' + shipVia);
 
-                // 1. Call external API FIRST
-                var apiResult = sendData(sales_id, entityType, suspended);
+                if (shipVia != 57733) {
+                    // 1. Call external API FIRST
+                    var apiResult = sendData(sales_id, entityType, suspended);
 
-                if (!apiResult.success) {
-                    throw apiResult.error || apiResult.response || 'API call failed';
+                    if (!apiResult.success) {
+                        throw apiResult.error || apiResult.response || 'API call failed';
+                    }
                 }
-
                 // 2. Update Sales Order ONLY after API success
-                var soRec = record.load({
+                // var soRec = record.load({
+                //     type: record.Type.SALES_ORDER,
+                //     id: sales_id
+                // });
+
+                // soRec.setValue({
+                //     fieldId: 'custbody_jyswms_suspend_picking',
+                //     value: suspended
+                // });
+
+                // soRec.save({
+                //     ignoreMandatoryFields: true
+                // });
+                var so_sub = record.submitFields({
                     type: record.Type.SALES_ORDER,
-                    id: sales_id
-                });
-
-                soRec.setValue({
-                    fieldId: 'custbody_jyswms_suspend_picking',
-                    value: suspended
-                });
-
-                soRec.save({
-                    ignoreMandatoryFields: true
+                    id: sales_id,
+                    values: {
+                        custbody_jyswms_suspend_picking: suspended
+                    },
+                    options: {
+                        enableSourcing: false,
+                        ignoreMandatoryFields: true
+                    }
                 });
                 log.audit('Suspend/Resume Picking Success', 'Sales Order ID: ' + sales_id + ', Suspended: ' + suspended);
                 context.response.write(JSON.stringify({

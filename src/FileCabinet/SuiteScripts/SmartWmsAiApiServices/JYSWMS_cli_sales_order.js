@@ -2,8 +2,8 @@
  * @NApiVersion 2.1
  * @NScriptType ClientScript
  */
-define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/message'],
-    function (currentRecord, https, url, message) {
+define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/message', 'N/search'],
+    function (currentRecord, https, url, message, search) {
 
         function pageInit(context) {
             // No-op
@@ -40,12 +40,20 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/message'],
             try {
                 var rec = currentRecord.get();
                 var soId = rec.id;
+                var lookupField = search.lookupFields({
+                    type: search.Type.SALES_ORDER,
+                    id: soId,
+                    columns: ['shipmethod']
+                });
 
+                var so_shipvia = lookupField.shipmethod[0] ? lookupField.shipmethod[0].value : null;
+                // alert('shipvia: ' + so_shipvia);
+                // return;
                 var suiteletUrl = url.resolveScript({
-                    scriptId: 'customscript_jyswms_suspend_picking',   
+                    scriptId: 'customscript_jyswms_suspend_picking',
                     deploymentId: 'customdeploy_jyswms_suspend_picking'
                 });
-            
+
                 var response = https.post({
                     url: suiteletUrl,
                     headers: {
@@ -53,12 +61,13 @@ define(['N/currentRecord', 'N/https', 'N/url', 'N/ui/message'],
                     },
                     body: JSON.stringify({
                         salesOrderId: soId,
-                        suspendPicking: suspend
+                        suspendPicking: suspend,
+                        shipVia: so_shipvia
                     })
                 });
 
                 var result = JSON.parse(response.body);
-              
+
                 if (!result.success) {
                     throw result.message;
                 }

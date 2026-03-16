@@ -48,15 +48,152 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
             });
 
             log.debug("All Last Modified Item IDs (30 mins)", JSON.stringify(itemIds));
-            log.error("Total Unique Item IDs Count", itemIds.length);
+            log.audit("Total Unique Item IDs Count", itemIds.length);
 
             if (itemIds.length > 0) {
                 return itemIds;
             }
         } catch (error) {
-            log.error("error meassage", e.message);
+            log.error("error  recentUpdatedItems meassage", e.message);
         }
     }
+
+    function getAllItems() {
+
+        var itemIds = [];
+
+        try {
+
+            var itemSearch = search.create({
+                type: search.Type.ITEM,
+                filters: [
+                    ["isinactive", "is", "F"]
+                ],
+                columns: [
+                    search.createColumn({
+                        name: "internalid",
+                        sort: search.Sort.DESC
+                    })
+                ]
+            });
+
+            var pagedData = itemSearch.runPaged({
+                pageSize: 500
+            });
+
+            pagedData.pageRanges.forEach(function (pageRange) {
+
+                var page = pagedData.fetch({ index: pageRange.index });
+
+                page.data.forEach(function (result) {
+
+                    var id = result.getValue({
+                        name: "internalid"
+                    });
+
+                    if (id) {
+                        itemIds.push(id);
+                    }
+
+                });
+
+            });
+
+            log.audit("Total Items Found", itemIds.length);
+
+        } catch (e) {
+
+            log.error("getAllItems Error", e);
+
+        }
+
+        return itemIds;
+    }
+
+  
+    function chunkArray(arr, size) {
+
+        var result = [];
+
+        for (var i = 0; i < arr.length; i += size) {
+            result.push(arr.slice(i, i + size));
+        }
+
+        return result;
+    }
+
+  
+    function processAllItems(context, pageSize, startIndex) {
+
+        try {
+
+            var pageSize = 1000;
+            var startIndex = 0;
+
+            var allItems = getAllItems();
+
+            var batches = chunkArray(allItems, 500);
+
+            log.audit("Total Batches", batches.length);
+            var totalCount = 1
+            var allResults = [];
+            var response = {
+                status: 200,
+                message: 'Data retrieved successfully',
+                summary: {
+                    total_records: totalCount,
+                    total_pages: 1,
+                    records_per_page: pageSize,
+                    current_page: Math.floor(startIndex / pageSize) + 1,
+                    pagination_info: {
+                        start_index: startIndex,
+                        end_index: startIndex + pageSize - 1,
+                        has_next_page: (startIndex + pageSize) < totalCount,
+                        has_previous_page: startIndex > 0
+                    }
+                },
+                data: {}
+            };
+
+
+            batches.forEach(function (batch, index) {
+
+                
+              log.audit("Processing b", {
+                "index": index,
+                "batch": batch
+              });
+
+                var context = {
+                    itemIds: batch
+                };
+
+                var inventoryData = getInventoryTemp(context);
+              
+                 log.audit("Processing Batch Data", inventoryData);
+                 //var inventoryData = inventoryData.data;
+                 var apiStatus = sendData(inventoryData);
+
+                if (inventoryData && inventoryData.data) {
+                    response.data = Object.assign(response.data, inventoryData.data);
+                }
+
+                //  log.audit("Batch Inventory Data Summary", JSON.stringify(inventoryData));
+
+            });
+            log.audit("Final Inventory Data Summary", JSON.stringify(response));
+           return true;
+
+
+        } catch (e) {
+
+            log.error("processAllItems Error", e);
+
+        }
+
+    }
+
+   
     function getInventory(context, pageSize, startIndex) {
         try {
             var ScriptStartTime = new Date().getTime();
@@ -170,7 +307,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                         itemData['bin_internalid'] = result.getValue(column) || " ";
                         itemData['bin_number'] = result.getText(column) || " ";
                         var binData = existingBinSequenceMap[binId];
-                        itemData['bin_index'] = binData.bin_index || " ";
+                        itemData['bin_index'] = " ";
                         itemData['bin_orientation'] = binData.bin_orientation || "";
                         itemData['wh'] = binData.wh || "";
                         itemData['room'] = binData.room || "";
@@ -186,7 +323,8 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 Data[internalId][locationId].total_available += availableQty;
             });
 
-            return {
+
+            var returnData = {
                 status: 200,
                 message: 'Data retrieved successfully',
                 summary: {
@@ -203,16 +341,148 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 },
                 data: Data
             };
+            return returnData;
 
         } catch (e) {
-            log.error("error message", e.message);
+            log.error("error message", e);
 
             return {
                 status: 500,
                 message: e.message
             };
         }
+    } 
+
+
+  function getInventoryTemp(context) {
+    try {
+
+        var scriptObj = runtime.getCurrentScript();
+        var inventorySearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_inventory_detail' });
+
+        var Data = {};
+        var binId = context.binId || "";
+        var itemIds = context.itemIds || "";
+
+        var existingBinSequenceMap = BinSequenceSearch();
+
+        var inventorySearch = search.load({
+            id: inventorySearchId,
+            type: search.Type.ITEM
+        });
+
+        var filters = inventorySearch.filters || [];
+
+        if (itemIds) {
+            filters.push(search.createFilter({
+                name: 'internalid',
+                operator: search.Operator.ANYOF,
+                values: itemIds
+            }));
+        }
+
+        if (binId) {
+            filters.push(search.createFilter({
+                name: 'binnumber',
+                join: "binOnHand",
+                operator: search.Operator.ANYOF,
+                values: binId
+            }));
+        }
+
+        inventorySearch.filters = filters;
+
+        var pagedData = inventorySearch.runPaged({
+            pageSize: 1000
+        });
+
+        var totalCount = pagedData.count;
+
+        pagedData.pageRanges.forEach(function (pageRange) {
+
+            var page = pagedData.fetch({ index: pageRange.index });
+
+            page.data.forEach(function (result) {
+
+                var internalId = result.getValue({ name: "internalid" });
+                var locationId = result.getValue({ name: "location", join: "binOnHand" });
+                var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
+
+                if (!internalId || !locationId) return;
+
+                if (!Data[internalId]) {
+                    Data[internalId] = {};
+                }
+
+                if (!Data[internalId][locationId]) {
+                    Data[internalId][locationId] = {
+                        total_available: 0,
+                        itemDetails: []
+                    };
+                }
+
+                var itemData = {};
+
+                result.columns.forEach(function (column) {
+
+                    var columnName = toSnakeCase(column.label || column.name);
+
+                    if (columnName == 'location') {
+
+                        itemData['loc_internalid'] = result.getValue(column) || " ";
+                        itemData['location'] = result.getText(column) || " ";
+
+                    } else if (columnName == 'bin_number') {
+
+                        var binInternalId = result.getValue(column);
+
+                        itemData['bin_internalid'] = binInternalId || " ";
+                        itemData['bin_number'] = result.getText(column) || " ";
+
+                        var binData = existingBinSequenceMap[binInternalId] || {};
+
+                        itemData['bin_index'] = binData.bin_index || " ";
+                        itemData['bin_orientation'] = binData.bin_orientation || "";
+                        itemData['wh'] = binData.wh || "";
+                        itemData['room'] = binData.room || "";
+                        itemData['aisle_no'] = binData.aisle_no || "";
+                        itemData['bin'] = binData.bin || "";
+
+                    } else {
+
+                        itemData[columnName] = result.getText(column) || result.getValue(column);
+
+                    }
+                });
+
+                Data[internalId][locationId].itemDetails.push(itemData);
+                Data[internalId][locationId].total_available += availableQty;
+
+            });
+
+        });
+
+        return {
+            status: 200,
+            message: 'Data retrieved successfully',
+            summary: {
+                total_records: totalCount
+            },
+            data: Data
+        };
+
+    } catch (e) {
+
+        log.error("error message", e);
+
+        return {
+            status: 500,
+            message: e.message
+        };
     }
+}
+
+  
 
 
 
@@ -413,6 +683,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
     return {
         getCounts: getCounts,
         getInventory: getInventory,
-        getItemInventorydata: getItemInventorydata
+        getItemInventorydata: getItemInventorydata,
+        processAllItems: processAllItems
     };
 });
