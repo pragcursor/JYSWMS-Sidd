@@ -1,46 +1,58 @@
- /**
-  * @NApiVersion 2.1
-  * @NScriptType Suitelet
-  */
-define(['N/record', 'N/log'], 
+/**
+ * @NApiVersion 2.1
+ * @NScriptType Suitelet
+ */
+define(['N/record', 'N/log'],
   (record, log) => {
 
     const onRequest = (context) => {
-      context.response.setHeader({ 
-        name: 'Content-Type', 
-        value: 'application/json' 
+      context.response.setHeader({
+        name: 'Content-Type',
+        value: 'application/json'
       });
 
       let result = { success: false, message: '', updatedId: null };
 
       try {
-        // Reads directly from URL params (no JSON body required)
         const params = context.request.parameters;
-        const recId = params.record_id;
-        const recType = params.record_type;
 
-        if (!recId || !recType) {
-          throw new Error('Missing URL params: record_id and record_type');
+        const recId = params.record_id;
+
+        // ❌ OLD GENERIC APPROACH (COMMENTED OUT)
+        // const recType = params.record_type;
+        // if (!recId || !recType) {
+        //   throw new Error('Missing URL params: record_id and record_type');
+        // }
+
+        if (!recId) {
+          throw new Error('Missing URL param: record_id');
         }
 
+        // ❌ OLD LOAD (COMMENTED OUT)
+        // const rec = record.load({
+        //   type: recType,
+        //   id: parseInt(recId, 10)
+        // });
+
+        // ✅ NEW: LOAD SALES ORDER ONLY
         const rec = record.load({
-          type: recType,
+          type: record.Type.SALES_ORDER,
           id: parseInt(recId, 10)
         });
 
-        // Add field changes here if needed
-        // rec.setValue({ fieldId: 'custbody_example', value: 'Updated' });
+        // Optional: field updates go here
+        // rec.setValue({ fieldId: 'memo', value: 'Updated via Suitelet' });
 
         const updatedRecId = rec.save({
           enableSourcing: true,
           ignoreMandatoryFields: true
         });
 
-        log.audit('Success', `Type: ${recType}, ID: ${recId} -> ${updatedRecId}`);
+        log.audit('Success', `Sales Order ID: ${recId} -> ${updatedRecId}`);
 
         result = {
           success: true,
-          message: `Updated ${recType} ${recId}`,
+          message: `Updated Sales Order ${recId}`,
           updatedId: updatedRecId
         };
 

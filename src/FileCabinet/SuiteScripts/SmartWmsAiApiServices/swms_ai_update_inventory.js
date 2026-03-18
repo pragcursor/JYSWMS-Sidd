@@ -21,14 +21,14 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                     recType = context.oldRecord.type;
                     rec = context.oldRecord;
 
-                    log.error("Record Info (DELETE)", { recId, recType });
+                    log.debug("Record Info (DELETE)", { recId, recType });
 
                     if (ITEM_TYPES.includes(recType)) {
                         itemIds.push(recId.toString());
                     }
                     else if (recType == 'itemreceipt') {
 
-                        log.error("itemreceipt - (Delete)", { recId, recType });
+                        log.debug("itemreceipt - (Delete)", { recId, recType });
                         itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
 
                     }
@@ -37,6 +37,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                     }
 
                 } else {
+                  
                     recId = context.newRecord.id || "";
                     recType = context.newRecord.type || "";
                     rec = context.newRecord;
@@ -72,7 +73,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
 
                 // Final processing
                 if (itemIds.length) {
-                    ////log.debug("Record Info (CREATE/EDIT)", { recId, recType });
+                    log.debug("Record Info (CREATE/EDIT)", { recId, recType });
                     processInventory(itemIds);
                 } else {
                     //log.debug("No Item IDs Found", { recId, recType });
@@ -116,7 +117,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
             //  //log.debug("Inventory Data", inventoryData);
 
             const apiStatus = sendData(inventoryData);
-            //log.debug("API Response", apiStatus);
+            log.error("API Response", apiStatus);
         }
 
         /** Authenticates & returns access token */
@@ -166,6 +167,9 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                 });
 
                 const raw = response.body || "";
+              
+               // log.error(body,raw);
+              
                 const success = response.code === 200;
                 return { success, response: raw };
 

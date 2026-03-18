@@ -43,10 +43,10 @@ define(['N/search', 'N/record', 'N/log'], function (search, record, log) {
             return true;
         });
 
-        log.audit('Duplicate AMZCC Records Found', duplicateRecordIds);
-      log.error("duplicateRecordIds",duplicateRecordIds.length);
-       log.debug('Duplicate AMZCC Records Found', duplicateRecordIds);
-      log.debug("duplicateRecordIds",duplicateRecordIds.length);
+      //  log.audit('Duplicate AMZCC Records Found', duplicateRecordIds);
+     // log.error("duplicateRecordIds",duplicateRecordIds.length);
+      // log.debug('Duplicate AMZCC Records Found', duplicateRecordIds);
+     // log.debug("duplicateRecordIds",duplicateRecordIds.length);
 
         // Delete duplicate records
         for (var i = 0; i < duplicateRecordIds.length; i++) {

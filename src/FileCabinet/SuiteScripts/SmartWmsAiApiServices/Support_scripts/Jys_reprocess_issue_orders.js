@@ -662,6 +662,11 @@ define([
                     fieldId: 'custrecord_jyswms_fulfillment_link',
                     value: true
                 });
+                fulfillmentRec.setCurrentSublistValue({
+                    sublistId: sublistId,
+                    fieldId: 'custrecord_jyswms_createdfrom',
+                    value: true
+                });
 
                 fulfillmentRec.commitLine({ sublistId: sublistId });
             });

@@ -126,7 +126,7 @@ define(['N/record', 'N/https', 'N/log'],
                     return parsed.access_token;
                 }
 
-                log.error('Token Generation Failed', parsed);
+               // log.error('Token Generation Failed', parsed);
                 return null;
 
             } catch (e) {

@@ -18,7 +18,7 @@ define(['N/https', 'N/log'], (https, log) => {
                 password: 's9u[7zC720%pZr'
             };
 
-            log.error('formData', formData);
+           // log.error('formData', formData);
 
             const headerObj = {
                 'Content-Type': 'application/json'
@@ -31,7 +31,7 @@ define(['N/https', 'N/log'], (https, log) => {
                     headers: headerObj
                 });
 
-                log.error('login response', JSON.stringify(response));
+                //log.error('login response', JSON.stringify(response));
 
                 const responseBody = response.body || '';
                 const parsedBody = JSON.parse(responseBody); // Convert JSON string to object
@@ -59,7 +59,7 @@ define(['N/https', 'N/log'], (https, log) => {
             const webhookUrl = 'https://api.jyswms.com/ltl-users-summary';  ///ltl-users-summary
 
             const token = generateToken();
-            log.error('token', token);
+           // log.error('token', token);
 
             if (!token) {
                 return {
@@ -78,7 +78,7 @@ define(['N/https', 'N/log'], (https, log) => {
                 headers: headers
             });
 
-            log.error('LTL Summary response', JSON.stringify(response));
+          //  log.error('LTL Summary response', JSON.stringify(response));
 
             const responseBody = response.body || '{}';
             const parsedBody = JSON.parse(responseBody);

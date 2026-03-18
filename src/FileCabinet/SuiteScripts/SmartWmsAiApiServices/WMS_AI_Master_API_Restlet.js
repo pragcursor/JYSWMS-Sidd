@@ -47,6 +47,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             var startIndex = (pageNumber - 1) * pageSize;
 
             switch (action) {
+                case 'get_unSyncedOrders':
+                    return getUnSyncedOrders(context);
 
                 case 'get_orders':
                     return orderUtils.getOrdersOptimized(context, pageSize, startIndex);
@@ -61,13 +63,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'get_amzlOrders':
                     return orderUtils.getAmzlOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
-                    return orderUtils.getDropShipOrders(context, pageSize, startIndex); //orderUtils.getDropShipOrders(context, pageSize, startIndex);
+                    return orderUtils.getDropShipOrders_helperfunction(context, pageSize, startIndex); //orderUtils.getDropShipOrders(context, pageSize, startIndex);
                 case 'get_partaillDropShipOrders':
                     return orderUtils.getDropShipOrders_partials(context, pageSize, startIndex);
                 case 'getDropShipOrdersPerOrder':
                     return orderUtils.getDropShipOrdersPerOrder(context, pageSize, startIndex);
                 case 'getOrdersDUP':
                     return orderUtils.getDropShipOrders_helperfunction(context, pageSize, startIndex);  //getDropShipOrders_helperfunction
+                case 'getTestFunction':
+                    return orderUtils.getDropShipOrders_checkinDB(context, pageSize, startIndex);
                 case 'get_UnpickedOrders':
                     return orderUtils.getUnpicked(context, pageSize, startIndex);
                 case 'getItemSalesPerCustomer':
@@ -134,7 +138,104 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
+    // get unsynced orders
+    /**
+     * Get unsynced orders
+     * @param {Object} context - The context object
+     * @returns {Object} - The response object
+     */
+    function getUnSyncedOrders(context) {
+        try {
+            var unsyncedOrders = [];
+            const salesorderSearchObj = search.create({
+                type: "salesorder",
+                filters:
+                    [
+                        ["type", "anyof", "SalesOrd"],
+                        "AND",
+                        ["mainline", "is", "F"],
+                        "AND",
+                        ["custbody_jys_enabled_customer", "is", "T"],
+                        "AND",
+                        ["custcol_jyswms_picked_qty", "isempty", ""],
+                        "AND",
+                        ["status", "anyof", "SalesOrd:B"],
+                        "AND",
+                        ["shipmethod", "noneof", "57733"],
+                        "AND",
+                        ["taxline", "is", "F"],
+                        "AND",
+                        ["shipping", "is", "F"]
+                    ],
+                columns:
+                    [
+                        search.createColumn({
+                            name: "internalid",
+                            summary: "GROUP",
+                            label: "Internal ID"
+                        })
+                    ]
+            });
+            const searchResultCount = salesorderSearchObj.runPaged().count;
+            log.debug("salesorderSearchObj result count", searchResultCount);
+            salesorderSearchObj.run().each(function (result) {
+                unsyncedOrders.push(result.getValue({
+                    name: "internalid",
+                    summary: "GROUP",
+                }));
+                // .run().each has a limit of 4,000 results
+                return true;
+            });
 
+            return {
+                status: 200,
+                message: "UnSynced Orders retrieved successfully",
+                data: unsyncedOrders
+            };
+
+        } catch (e) {
+            log.error("Error in getUnSyncedOrders function", e);
+            return {
+                status: 500,
+                message: e.message
+            };
+        }
+    }
+
+    // update unsynced orders
+    /**
+     * Update unsynced orders
+     * @param {Object} context - The context object
+     * @returns {Boolean} - The result of the update
+     */
+    function updateUnSyncedOrders(context) {
+        try {
+            var unsyncedOrders = context.data;
+            log.error("UnSynced Orders", unsyncedOrders);
+            var successCount = 0;
+            var failedCount = 0;
+            for (var i = 0; i < unsyncedOrders.length; i++) {
+                var orderId = unsyncedOrders[i];
+                var salesOrderObj = record.load({ type: 'salesorder', id: orderId });
+                if (salesOrderObj.save({ ignoreMandatoryFields: true })) {
+                    successCount++;
+                } else {
+                    failedCount++;
+                }
+            }
+            return {
+                status: 200,
+                message: "UnSynced Orders updated successfully",
+                data: {
+                    successCount: successCount,
+                    failedCount: failedCount
+                }
+            };
+        } catch (e) {
+            log.error("Error in updateUnSyncedOrders function", e);
+            return false;
+        }
+    }
 
     /**
    * Optimized version of your getOrders function.
@@ -591,8 +692,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             .replace(/\s+/g, '_');     // spaces → underscore
     }
 
-
-
     // Cleaned / unchanged helper — returns ARRAY of bin rows (guaranteed)
     function getBinTransferinfo(result) {
         try {
@@ -678,7 +777,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             return isNaN(n) ? "" : n;
         }
     }
-
 
     function post(context) {
         try {
@@ -786,6 +884,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             let recType = '';
 
             switch (action) {
+                case 'updateUnSyncedOrders':
+                    recType = 'unSynced Orders';
+                    break;
                 case 'fullfillOrders':
                     recType = 'Item Fulfillment';
                     break;
@@ -850,7 +951,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         value: context.portalId
                     });
                 }
-                var excludeActions_portalId = ["itemnotpicked_invchecked", "sopicked_endoftheday"];
+                var excludeActions_portalId = ["itemnotpicked_invchecked", "sopicked_endoftheday", "updateUnSyncedOrders"];
                 if (excludeActions_portalId.indexOf(context.action) === -1) {
                     if (context.portalId == null || context.portalId === '' || context.portalId === undefined) {
                         return {
@@ -926,7 +1027,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
 
             var response = '';
+
             switch (action) {
+                case 'updateUnSyncedOrders':
+                    response = updateUnSyncedOrders(context);
+                    break;
                 case 'post_returnOrders':
                     response = returnUtils.processReturn(context.data);
                     break;
@@ -953,7 +1058,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     break;
                 case 'itemnotpicked_invchecked':
                     // log.error("itemnotpicked_invchecked - Inventory data response", JSON.stringify(context));
-                    response = inventoryUtils.getItemInventorydata(context);
+                    response = inventoryUtils.process_No_Inv_items(context);
                     break;
                 case 'markAsPicked':
                     // log.error("Context before markAsPicked", context);
@@ -1501,9 +1606,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-
-
-
     function generateToken() {
         try {
             var webhookUrl = 'https://api.jyswms.com/user/login'; // prod Url
@@ -1635,13 +1737,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             return false;
         }
     }
+
     /*
     function markAsPicked(requestBody, jyswmsApiCustRecId) {
         var headerId = null;
         try {
-
+ 
             const startTime = new Date().getTime();
-
+ 
             log.error('Incoming Data - MarkAsPicked', JSON.stringify(requestBody));
             var savedTransfers = [];
             var savedHeaders = [];
@@ -1649,7 +1752,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             // STEP 1: Build existing SO map
             var existingMap = {};
             var binMap = getBinNameToIdMap();
-
+ 
             var headerSearch = search.create({
                 type: 'customrecord_order_fulfillment_details',
                 filters: [
@@ -1666,7 +1769,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 return true;
             });
             log.audit('Existing SO Map', JSON.stringify(existingMap));
-
+ 
             // Validate request body structure
             if (!requestBody || !requestBody.data || !Array.isArray(requestBody.data)) {
                 return {
@@ -1674,23 +1777,23 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     message: 'Invalid request body: data array is required'
                 };
             }
-
+ 
             // STEP 2: Process each sales order in JSON
             for (var d = 0; d < requestBody.data.length; d++) {
                 var Data = requestBody.data[d];
                 var salesOrders = Data.salesOrders || [];
-
+ 
                 // Skip if no sales orders in this data item
                 if (!salesOrders || salesOrders.length === 0) {
                     log.error('No sales orders found in data item', d);
                     continue;
                 }
-
+ 
                 for (var i = 0; i < salesOrders.length; i++) {
-
+ 
                     var so = salesOrders[i];
                     var salesOrderId = so.salesOrderId;
-
+ 
                     try {
                         if (salesOrderId && jyswmsApiCustRecId) {
                             record.submitFields({
@@ -1705,15 +1808,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 }
                             });
                         }
-
+ 
                     } catch (error) {
                         log.error("error setting the so", error.message)
                     }
-
-
-
+ 
+ 
+ 
                     if (!salesOrderId) continue;
-
+ 
                     var itemId = so.itemInternalId || Data.itemInternalId || Data.item || '';
                     var pickQty = Data.picked_quantity || 0;
                     var binId = Data.binInternalId || '';
@@ -1724,68 +1827,68 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         isTruthyFlag(so.is_close)
                     );
                     var locationId = Data.locationId || null;
-
-
-
+ 
+ 
+ 
                     if (!locationId && Data.location) {
                         locationId = Data.location === "L60-Hardeeville_SC" ? 15 : 9;
                     }
-
+ 
                     if (!binId) {
                         var binNumber = Data.bin;
                         binId = binMap[binNumber]
                     }
-
+ 
                     var savedId = so.bin_transfer_internal_id || "";
                     var portalId = requestBody.portalId || requestBody.portalid;
                     var pickerName = requestBody.userName || requestBody.username || requestBody.pickerName;
-
-
-
-
+ 
+ 
+ 
+ 
                     var trackingNumbers = [];
-
+ 
                     // --- Extract tracking numbers safely ---
                     var trackingList = (so.labelData || [])
                         .map(function (l) {
                             return l.sscc_code || l.tracking_number || "";
                         })
                         .filter(Boolean);
-
+ 
                     // --- Extract SSCC codes ONLY if labelData2 exists ---
                     var ssccList = (so.labelData2 || [])
                         .map(function (l) {
                             return l.sscc_code || l.tracking_number || "";
                         })
                         .filter(Boolean);
-
+ 
                     log.error("trackingList", trackingList);
                     log.error("ssccList", ssccList);
-
-
+ 
+ 
                     if (so.packing_slip) {
                         trackingList = [];
-
+ 
                         trackingList = (so.labelData || [])
                             .map(function (l) {
                                 return l.tracking_number || "";
                             })
                             .filter(Boolean);
-
+ 
                     }
-
+ 
                     // --- CASE 1: labelData2 exists → pair by index ---
                     if (ssccList.length && trackingList.length && !so.packing_slip) {
-
+ 
                         var pairCount = Math.min(trackingList.length, ssccList.length);
-
+ 
                         for (var i = 0; i < pairCount; i++) {
                             trackingNumbers.push({
                                 ssccCode: ssccList[i],
                                 trackingNumber: trackingList[i]
                             });
                         }
-
+ 
                     }
                     // --- CASE 2: labelData2 does NOT exist → tracking only ---
                     else if (!so.packing_slip) {
@@ -1804,13 +1907,13 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             });
                         });
                     }
-
-
-
-
+ 
+ 
+ 
+ 
                   //  log.error("trackingNumbers", trackingNumbers);
-
-
+ 
+ 
                     log.audit('Processing SO', {
                         salesOrderId: salesOrderId,
                         itemId: itemId,
@@ -1818,7 +1921,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         locationId: locationId,
                         pickQty: pickQty
                     });
-
+ 
                     // fallback lookup location if missing
                     if (!locationId && binId) {
                         var locationLookup = search.lookupFields({
@@ -1828,13 +1931,13 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         });
                         locationId = locationLookup.location && locationLookup.location[0] && locationLookup.location[0].value;
                     }
-
+ 
                     // Validate required fields before proceeding
                     if (!itemId) {
                         log.error('Missing itemId for sales order', salesOrderId);
                         continue;
                     }
-
+ 
                     // If caller sent isClose flag, close SO line and skip pick flow
                     if (isClose === true) {
                         log.audit('isClose flag detected - closing SO line', {
@@ -1845,59 +1948,59 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         closeSalesOrderItem(salesOrderId, itemId, uniqueId);
                         continue;
                     }
-
+ 
                     if (pickQty === null || pickQty === undefined) {
-
-
+ 
+ 
                         log.error('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
                         continue;
-
+ 
                     }
                     if (!locationId) {
                         log.error('Missing locationId for sales order', salesOrderId);
                         continue;
                     }
-
+ 
                     var bulkStageBin = (locationId === 9) ? 4859 : 16692;
-
+ 
                     // STEP 3: Load or create header
                     headerId = existingMap[salesOrderId];
                     log.error("headerId", headerId);
                     var headerRec;
-
-
+ 
+ 
                     // var isSingleIf = false;
-
+ 
                     // if (headerId) {
-
-
-
-
+ 
+ 
+ 
+ 
                     //     var customerlookup = search.lookupFields({
                     //         type: 'customrecord_order_fulfillment_details',
                     //         id: headerId,
                     //         columns: ['custrecord_jyswms_customer_frm_so']
                     //     });
-
+ 
                     //      var lookup = search.lookupFields({
                     //         type: 'customrecord_order_fulfillment_details',
                     //         id: headerId,
                     //         columns: ['custrecord_jywms_single_if_from_customer']
                     //     });
-
+ 
                     //   log.error("lookup",JSON.stringify(lookup));
-
+ 
                     //   log.error("lookup",JSON.stringify(customerlookup));
-
+ 
                     //     isSingleIf =
                     //         lookup.custrecord_jywms_single_if_from_customer &&
                     //         lookup.custrecord_jywms_single_if_from_customer.length > 0 &&
                     //         lookup.custrecord_jywms_single_if_from_customer[0].value === 'T';
                     // }
                     if (headerId) {
-
+ 
                         log.error("headerId", headerId);
-
+ 
                         const salesorderSearchObj = search.create({
                             type: "salesorder",
                             filters: [
@@ -1914,27 +2017,27 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 })
                             ]
                         });
-
+ 
                         salesorderSearchObj.run().each(function (result) {
-
+ 
                             var singleIFValue = result.getValue({
                                 name: "custentity_single_if",
                                 join: "customer"
                             });
-
+ 
                             isSingleIf = singleIFValue === true || singleIFValue === 'T';
-
+ 
                             return false; // Only one result expected
                         });
-
-
+ 
+ 
                         log.debug("Final isSingleIf", isSingleIf);
                     }
                   
                     if (salesOrderId) {
-
+ 
                         log.error("headerId", headerId);
-
+ 
                         const salesorderSearchObj = search.create({
                             type: "salesorder",
                             filters: [
@@ -1951,37 +2054,37 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 })
                             ]
                         });
-
+ 
                         salesorderSearchObj.run().each(function (result) {
-
+ 
                             var singleIFValue = result.getValue({
                                 name: "custentity_single_if",
                                 join: "customer"
                             });
-
+ 
                             isSingleIf = singleIFValue === true || singleIFValue === 'T';
-
+ 
                             return false; // Only one result expected
                         });
-
-
+ 
+ 
                         log.debug("Final isSingleIf", isSingleIf);
                     }
-
+ 
                   
-
-
+ 
+ 
                    // log.error("isSingleIf", isSingleIf);
-
+ 
                     if (headerId && isSingleIf) {
-
+ 
                         // Reuse existing header ONLY when checkbox is checked
                         headerRec = record.load({
                             type: 'customrecord_order_fulfillment_details',
                             id: headerId,
                             isDynamic: true
                         });
-
+ 
                     } else {
                         //  Create new header when:
                         // - no headerId
@@ -1990,24 +2093,24 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             type: 'customrecord_order_fulfillment_details',
                             isDynamic: true
                         });
-
+ 
                         headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
                         headerRec.setValue('custrecord_jyswms_portal_id', portalId);
                         headerRec.setValue('custrecord_jyswms_location_id', locationId);
-
+ 
                         headerId = headerRec.save();
-
+ 
                        // log.error("Created new header record", headerId);
                     }
-
-
+ 
+ 
                     // STEP 4: Create Bin Transfer
                     if (savedId) {
                         log.error("savedId -- bintrnasferid", savedId);
                     } else {
-
+ 
                         try {
-
+ 
                             var binTransferRec = record.create({ type: 'bintransfer', isDynamic: true });
                             binTransferRec.setValue({ fieldId: 'subsidiary', value: 1 });
                             binTransferRec.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
@@ -2016,11 +2119,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             binTransferRec.setValue({ fieldId: 'custbody_jyswms_item_unique_id', value: uniqueId });
                             binTransferRec.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName });
                             binTransferRec.setValue({ fieldId: 'custbody_realted_sales_order', value: salesOrderId });
-
+ 
                             binTransferRec.selectNewLine({ sublistId: 'inventory' });
                             binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
                             binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'quantity', value: pickQty });
-
+ 
                             var inventoryDetail = binTransferRec.getCurrentSublistSubrecord({
                                 sublistId: 'inventory',
                                 fieldId: 'inventorydetail'
@@ -2030,9 +2133,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: pickQty });
                             inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'tobinnumber', value: bulkStageBin });
                             inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
-
+ 
                             binTransferRec.commitLine({ sublistId: 'inventory' });
-
+ 
                             log.audit('BinTransfer Record - Before Save', {
                                 salesOrderId: salesOrderId,
                                 itemId: itemId,
@@ -2040,10 +2143,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 fromBin: binId,
                                 toBin: bulkStageBin
                             });
-
+ 
                             // Save bin transfer with error handling
                             // var savedId = null;
-
+ 
                             try {
                                 savedId = binTransferRec.save();
                             } catch (e) {
@@ -2058,10 +2161,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 pickQty: pickQty
                             });
                             // Bin transfer failed, but continue processing to create custom record line
-
+ 
                         }
                     }
-
+ 
                     // STEP 5: Reload header record before adding lines (ensures fresh copy)
                     // This is critical: ensures we have the latest version before adding sublist lines
                     headerRec = record.load({
@@ -2069,23 +2172,23 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         id: headerId,
                         isDynamic: true
                     });
-
+ 
                     try {
-
+ 
                      //   var singleIf = headerRec.getValue('custrecord_jywms_single_if_from_customer');
                         if (isSingleIf == false || isSingleIf == 'F') {
                             headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
                             headerRec.setValue('custrecord_jyswms_approved', true);
                             headerRec.setValue('custrecord_jyswmws_perform_update', true);
-
+ 
                         }
                         headerRec.setValue('custrecord_jyswms_location_id', locationId);
-
+ 
                     } catch (error) {
                         log.error("error message", error.message);
                     }
-
-
+ 
+ 
                     // STEP 6: Adding JYSWMS sales order Items (custom recrd lines)
                     var line = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_sales_order_header' });
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item', value: itemId });
@@ -2097,15 +2200,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_so_line_loc', value: locationId });
                     // Initialize inventory adjustment ID
                     var invAdjId = "";
-
+ 
                     // Wrap entire negative inventory adjustment logic in try-catch block
                     try {
                         var soItemQuantity = so.quantity;
                         // log.error("soItemQuantity", soItemQuantity);
-
+ 
                         var userPickedQty = pickQty;
                         //  log.error("userPickedQty", userPickedQty);
-
+ 
                         // Calculate quantity difference
                         var qtyDiff = soItemQuantity - userPickedQty;
                         if (qtyDiff <= 0) {
@@ -2114,9 +2217,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         } else {
                             // Create inventory adjustment if there's a shortfall
                             // var negativeQty = -qtyDiff;
-
+ 
                             // new logic for fetching item quantity per bin details
-
+ 
                             var negativeQty = '';
                             const inventorybalanceSearchObj = search.create({
                                 type: "inventorybalance",
@@ -2148,86 +2251,86 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 negativeQty = -onHandQty;
                                 return true;
                             });
-
-
+ 
+ 
                             log.debug(" Negative inventory adjustment - NegativeQuanity : ", negativeQty);
-
+ 
                             var inventoryAdjRec = record.create({
                                 type: record.Type.INVENTORY_ADJUSTMENT,
                                 isDynamic: true
                             });
-
+ 
                             // Set subsidiary (update if your account uses multiple)
                             inventoryAdjRec.setValue({
                                 fieldId: 'subsidiary',
                                 value: 1
                             });
-
+ 
                             inventoryAdjRec.setValue({ fieldId: 'adjlocation', value: locationId });
-
+ 
                             inventoryAdjRec.setValue({
                                 fieldId: 'account',
                                 value: 464 // update as needed
                             });
-
+ 
                             inventoryAdjRec.setValue({ fieldId: 'memo', value: 'Auto negative adjustment for bin: ' + binId });
-
+ 
                             // Add inventory line
                             inventoryAdjRec.selectNewLine({ sublistId: 'inventory' });
-
+ 
                             inventoryAdjRec.setCurrentSublistValue({
                                 sublistId: 'inventory',
                                 fieldId: 'item',
                                 value: itemId
                             });
-
+ 
                             inventoryAdjRec.setCurrentSublistValue({
                                 sublistId: 'inventory',
                                 fieldId: 'location',
                                 value: locationId
                             });
-
+ 
                             // Set quantity before inventory detail
                             inventoryAdjRec.setCurrentSublistValue({
                                 sublistId: 'inventory',
                                 fieldId: 'adjustqtyby',
                                 value: negativeQty
                             });
-
+ 
                             // Lookup item properties safely
                             var itemLookup = search.lookupFields({
                                 type: search.Type.ITEM,
                                 id: itemId,
                                 columns: ['usebins', 'recordtype']
                             });
-
+ 
                             // log.error('Item Lookup', JSON.stringify(itemLookup));
-
+ 
                             var useBins =
                                 itemLookup.usebins === true ||
                                 itemLookup.usebins === 'T' ||
                                 (Array.isArray(itemLookup.usebins) && itemLookup.usebins[0] === 'T');
-
+ 
                             var isInventoryItem =
                                 ['inventoryitem', 'serializedinventoryitem', 'lotnumberedinventoryitem'].includes(itemLookup.recordtype);
-
+ 
                             if (useBins && isInventoryItem && binId) {
                                 try {
                                     var invDetail = inventoryAdjRec.getCurrentSublistSubrecord({
                                         sublistId: 'inventory',
                                         fieldId: 'inventorydetail'
                                     });
-
+ 
                                     // 1.Remove existing inventory assignment lines
                                     var existingLines = invDetail.getLineCount({ sublistId: 'inventoryassignment' });
                                     for (var k = existingLines - 1; k >= 0; k--) {
                                         invDetail.removeLine({ sublistId: 'inventoryassignment', line: k });
                                     }
                                     // log.error(" Cleared Existing Inventory Lines", existingLines);
-
+ 
                                     // 2: Add new inventory assignment
                                     invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-
+ 
                                     invDetail.setCurrentSublistValue({
                                         sublistId: 'inventoryassignment',
                                         fieldId: 'binnumber',
@@ -2238,7 +2341,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                         fieldId: 'quantity',
                                         value: negativeQty
                                     });
-
+ 
                                     // Step 3: Verify values before commit
                                     var getBinID = invDetail.getCurrentSublistValue({
                                         sublistId: 'inventoryassignment',
@@ -2248,11 +2351,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                         sublistId: 'inventoryassignment',
                                         fieldId: 'quantity'
                                     });
-
-
+ 
+ 
                                     invDetail.commitLine({ sublistId: 'inventoryassignment' });
                                     log.audit(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
-
+ 
                                 } catch (invDetailError) {
                                     log.error("❌ Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
                                     // Continue with adjustment even if inventory detail fails
@@ -2260,23 +2363,23 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             } else {
                                 log.error("Skipping inventory detail — missing bin or not inventory-managed");
                             }
-
+ 
                             inventoryAdjRec.commitLine({ sublistId: 'inventory' });
-
+ 
                             var summary = {
                                 itemId: itemId,
                                 binId: binId,
                                 locationId: locationId,
                                 negativeQty: negativeQty
                             };
-
-
+ 
+ 
                             // Save record
                             invAdjId = inventoryAdjRec.save({
                                 enableSourcing: true,
                                 ignoreMandatoryFields: true
                             });
-
+ 
                             log.error(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
                         }
                     } catch (negativeInvError) {
@@ -2288,13 +2391,13 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         });
                         // Continue processing even if adjustment fails - invAdjId remains null
                     }
-
+ 
                     // Set bin transfer ID and inventory adjustment ID on the line
                     // Only set bin transfer ID if bin transfer was successful
                     if (savedId) {
                         line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_item_bintransfer_id', value: savedId });
                     }
-
+ 
                     if (invAdjId) {
                         line.setCurrentSublistValue({
                             sublistId: 'recmachcustrecord_sales_order_header',
@@ -2302,10 +2405,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             value: invAdjId
                         });
                     }
-
+ 
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_uniqueid', value: uniqueId });
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_portal_id', value: portalId });
-
+ 
                     line.setCurrentSublistValue({
                         sublistId: 'recmachcustrecord_sales_order_header',
                         fieldId: 'custrecord_jyswms_item_picker_name',
@@ -2313,12 +2416,12 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     });
                     line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_tracking_numbers', value: trackingNumbers.length || 0 });
                     headerRec.commitLine({ sublistId: 'recmachcustrecord_sales_order_header' });
-
+ 
                     // STEP 7: Add tracking sublist lines lines
                     // log.error('Tracking Numbers', trackingNumbers);
-
+ 
                     trackingNumbers.forEach(function (track) {
-
+ 
                         // if (!track || !track.ssccCode) {
                         //     log.error("Skipping – SSCC missing", track);
                         //     return;
@@ -2327,14 +2430,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             log.error("Skipping – track missing", track);
                             return;
                         }
-
+ 
                         // 🔍 CHECK IN SUBLIST (not input array)
                         if (ssccExistsInSublist(headerRec, track.ssccCode)) {
                             log.error("Skipping – SSCC already exists in sublist", track.ssccCode);
                             return;
                         }
-
-
+ 
+ 
                         //  log.error("track", track);
                         var trackLine = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_item', value: itemId });
@@ -2346,9 +2449,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_dropship', value: track.trackingNumber || " " });
                         headerRec.commitLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
                     });
-
+ 
                     // log.error("Started Header line set");
-
+ 
                     //  Get total SO quantity from Sales Order
                     var soLookup = search.lookupFields({
                         type: 'salesorder',
@@ -2356,11 +2459,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         columns: ['custbody_so_total_qty']
                     });
                     var totalSOQty = Number(soLookup.custbody_so_total_qty) || 0;
-
+ 
                     //  Calculate total picked quantity from all item lines
                     var totalPickedQty = pickQty;
                     var lineCount = headerRec.getLineCount({ sublistId: 'recmachcustrecord_sales_order_header' });
-
+ 
                     for (var l = 0; l < lineCount; l++) {
                         var linePicked = Number(headerRec.getSublistValue({
                             sublistId: 'recmachcustrecord_sales_order_header',
@@ -2369,42 +2472,42 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         })) || 0;
                         totalPickedQty += linePicked;
                     }
-
+ 
                     // Set both totals on header
                     headerRec.setValue({ fieldId: 'custrecord_jyswms_total_so_qty', value: totalSOQty });
                     headerRec.setValue({ fieldId: 'custrecord_jyswms_total_pick_qty', value: totalPickedQty });
-
+ 
                     //  Compare totals and set Approved checkbox
                     var isApproved = (totalSOQty <= totalPickedQty);
                    // var singleIf = headerRec.getValue({ fieldId: 'custrecord_jywms_single_if_from_customer' });
-
+ 
                     if (isSingleIf == true || isSingleIf == 'T') {
                         headerRec.setValue({
                             fieldId: 'custrecord_jyswms_approved',
                             value: isApproved ? true : false
                         });
                     }
-
+ 
                     log.error('Header Totals and Approval', {
                         totalSOQty: totalSOQty,
                         totalPickedQty: totalPickedQty,
                         approved: isApproved
                     });
-
+ 
                     // Save header record with error handling
                     try {
                         headerId = headerRec.save();
                         // log.error("Saved Header", headerId);
                         existingMap[salesOrderId] = headerId;
-
+ 
                         // Add to response arrays for each sales order
                         // Only add bin transfer ID if bin transfer was successful
                         if (savedId) {
                             savedTransfers.push(savedId);
                         }
                         savedHeaders.push(headerId);
-
-
+ 
+ 
                     } catch (headerSaveError) {
                         log.error('Failed to save header record', {
                             error: headerSaveError.message,
@@ -2415,12 +2518,12 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         continue;
                     }
                 }
-
+ 
                 log.audit("MarkAsPicked", "savedTransfers: " + JSON.stringify(savedTransfers) + ", savedHeaders: " + JSON.stringify(savedHeaders));
-
+ 
             }
             const endTime = new Date().getTime();
-
+ 
             // Build expected JSON response
             const expectedResponse = {
                 status: 'success',
@@ -2428,12 +2531,12 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 binTransferId: savedTransfers,
                 customRecID: savedHeaders
             };
-
+ 
             // Log the expected JSON response
             log.debug('Expected JSON Response - MarkASpicked', JSON.stringify(expectedResponse));
-
+ 
             return expectedResponse;
-
+ 
         }
         catch (e) {
             log.error('POST Error', e);
@@ -2451,9 +2554,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
     */
-
-
-
 
     function markAsPicked(requestBody, jyswmsApiCustRecId) {
         var headerId = null;
@@ -3384,7 +3484,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-
     function markAsPickedGroup(requestBody, jyswmsApiCustRecId) {
         var headerId = null;
         try {
@@ -3417,11 +3516,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 var salesOrders = Data.salesOrders || [];
                 var headerId = null;
 
-                log.error("Data + length", d);
+                //  log.error("Data + length", d);
 
                 // Skip if no sales orders in this data item
                 if (!salesOrders || salesOrders.length === 0) {
-                    log.error('No sales orders found in data item', d);
+                    /// log.error('No sales orders found in data item', d);
                     continue;
                 }
 
@@ -3430,8 +3529,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     var so = salesOrders[s];
 
-                    log.error("salesOrder Object", JSON.stringify(so));
-                    log.error("salesOrder Object length ", s);
+                    //  log.error("salesOrder Object", JSON.stringify(so));
+                    //  log.error("salesOrder Object length ", s);
 
                     var salesOrderId = null;
                     salesOrderId = so.salesOrderId;
@@ -3443,7 +3542,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     ];
                     if (salesOrderId) {
 
-                        log.error('Adding sales order filter to search', salesOrderId);
+                        // log.error('Adding sales order filter to search', salesOrderId);
 
                         filters.push('AND');
                         filters.push(['custrecord_jyswms_sales_order_id', "anyof", salesOrderId]);
@@ -3458,7 +3557,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         existingMap[result.getValue('custrecord_jyswms_sales_order_id')] = result.id;
                         return true;
                     });
-                    log.audit('Existing SO Map', JSON.stringify(existingMap));
+                    // log.audit('Existing SO Map', JSON.stringify(existingMap));
 
                     try {
                         if (salesOrderId && jyswmsApiCustRecId) {
@@ -3499,7 +3598,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     } else {
                         pickQty = 0;
                     }
-                    var binId = Data.binInternalId || '';
+                    var binId = '';
                     var uniqueId = so.unique_id || '';
                     var isClose = (
                         isTruthyFlag(Data.isClose) ||
@@ -3535,8 +3634,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         })
                         .filter(Boolean);
 
-                    log.error("trackingList", trackingList);
-                    log.error("ssccList", ssccList);
+                    // log.error("trackingList", trackingList);
+                    // log.error("ssccList", ssccList);
 
 
                     if (so.packing_slip) {
@@ -3594,7 +3693,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     // Validate required fields before proceeding
                     if (!itemId) {
-                        log.error('Missing itemId for sales order', salesOrderId);
+                        // log.error('Missing itemId for sales order', salesOrderId);
                         continue;
                     }
 
@@ -3612,12 +3711,12 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     if (pickQty === null || pickQty === undefined) {
 
 
-                        log.error('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
+                        // log.error('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
                         continue;
 
                     }
                     if (!locationId) {
-                        log.error('Missing locationId for sales order', salesOrderId);
+                        // log.error('Missing locationId for sales order', salesOrderId);
                         continue;
                     }
 
@@ -3625,7 +3724,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                     // STEP 3: Load or create header
                     headerId = existingMap[salesOrderId];
-                    log.error("headerId", headerId);
+                    // log.error("headerId", headerId);
                     var headerRec;
 
 
@@ -3672,7 +3771,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             isDynamic: true
                         });
 
-                    } else {
+                    }
+                    else {
                         //  Create new header when:
                         // - no headerId
                         // - OR checkbox is unchecked
@@ -3697,7 +3797,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     // STEP 4: Create Bin Transfer
                     if (savedId) {
                         log.error("savedId -- bintrnasferId", savedId);
-                    } else {
+                    }
+                    else {
 
                         try {
 
@@ -3768,14 +3869,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         //   var singleIf = headerRec.getValue('custrecord_jywms_single_if_from_customer');
                         if (isSingleIf == false || isSingleIf == 'F') {
 
-                            log.error("Single IF is false - auto-approving header", salesOrderId);
+                            // log.error("Single IF is false - auto-approving header", salesOrderId);
 
                             record.submitFields({
                                 type: 'customrecord_order_fulfillment_details',
                                 id: headerId,
                                 values: {
-                                    custrecord_jyswms_is_partially_fulfilled: true,
-                                    custrecord_jyswms_approved: true,
+                                    // custrecord_jyswms_is_partially_fulfilled: true,
+                                    // custrecord_jyswms_approved: true,
                                     custrecord_jyswmws_perform_update: true
                                 },
                                 options: {
@@ -3869,7 +3970,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             });
 
 
-                            log.debug(" Negative inventory adjustment - NegativeQuanity : ", negativeQty);
+                            //  log.debug(" Negative inventory adjustment - NegativeQuanity : ", negativeQty);
 
                             var inventoryAdjRec = record.create({
                                 type: record.Type.INVENTORY_ADJUSTMENT,
@@ -3976,7 +4077,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
 
                                     invDetail.commitLine({ sublistId: 'inventoryassignment' });
-                                    log.audit(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
+                                    //   log.audit(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
 
                                 } catch (invDetailError) {
                                     log.error("Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
@@ -4025,12 +4126,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     }
 
                     if (invAdjId) {
-
                         itemRec.setValue({ fieldId: 'custrecord_jyswms_item_inv_adjy', value: invAdjId });
-
                     }
-
-
 
                     itemRec.setValue({ fieldId: 'custrecord_jyswms_item_uniqueid', value: uniqueId });
                     itemRec.setValue({ fieldId: 'custrecord_jyswms_item_portal_id', value: portalId });
@@ -4049,18 +4146,18 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         //     return;
                         // }
                         if (!track) {
-                            log.error("Skipping – track missing", track);
+                            //   log.error("Skipping – track missing", track);
                             return;
                         }
 
                         // CHECK IN SUBLIST (not input array)
                         if (ssccExistsInSublist(headerRec, track.ssccCode)) {
-                            log.error("Skipping trackingLines – SSCC already exists in sublist", track.ssccCode);
+                            // log.error("Skipping trackingLines – SSCC already exists in sublist", track.ssccCode);
                             return;
                         }
 
 
-                        log.error("track -- tracking line", track);
+                        // log.error("track -- tracking line", track);
 
 
                         var trackRec = record.create({
@@ -4084,12 +4181,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             ignoreMandatoryFields: false
                         });
 
-                        log.error("trackingRecId", trackingRecId);
+                        // log.error("trackingRecId", trackingRecId);
                         trackingLines.push(trackingRecId);
 
                     });
-
-
 
 
                     var soLookup = search.lookupFields({
@@ -4125,15 +4220,15 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         custrecord_jyswms_total_pick_qty: totalPickedQty
                     };
 
-                  if (isSingleIf == true || isSingleIf == 'T') {
+                    if (isSingleIf == true || isSingleIf == 'T') {
                         updateValues.custrecord_jyswms_approved = true;
-                   }
+                    }
 
-                    log.error('Header Totals and Approval', {
-                        totalSOQty: totalSOQty,
-                        totalPickedQty: totalPickedQty,
-                        approved: isApproved
-                    });
+                    // log.error('Header Totals and Approval', {
+                    //     totalSOQty: totalSOQty,
+                    //     totalPickedQty: totalPickedQty,
+                    //     approved: isApproved
+                    // });
 
                     // Update header using submitFields
                     try {
@@ -4213,7 +4308,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             };
 
             // Log the expected JSON response
-            log.debug('Expected JSON Response - MarkASpicked', JSON.stringify(expectedResponse));
+            //  log.debug('Expected JSON Response - MarkASpicked', JSON.stringify(expectedResponse));
 
             return expectedResponse;
 

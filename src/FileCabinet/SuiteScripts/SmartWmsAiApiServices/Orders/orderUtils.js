@@ -2408,280 +2408,222 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
     }
 
 
-    function getOrdersDUP(context) {
+    function getOrdersDUP(context, pageSize, startIndex) {
         try {
 
-            //  var scriptStartTime = new Date().getTime();
-            //log.error('Script Started', 'Start Time: ' + scriptStartTime / 1000 + ' seconds');
-
-            // var scriptObj = runtime.getCurrentScript();
-            // var SalesOrderHeaderId = scriptObj.getParameter({ name: 'custscript_wms_ai_salesorder_header' });
-            // var SalesOrderItemLevelDataId = scriptObj.getParameter({ name: 'custscript_wms_ai_salesorder_items' });
-
-            // var pickedItemUniqueIds = getPickedItemUniqueIds();
-            // var pickedItemUniqueIdsMap = getPickedItemUniqueIdsMap();
-            // log.error('pickedItemUniqueIds', pickedItemUniqueIds.length);
-            var itemPicked = false;
-            // log.error('Item Parameter', SalesOrderItemLevelDataId);
-
             var itemPrimaryUnitsMap = itemPrimaryUnits();
-            // log.error('itemPrimaryUnitsMap', JSON.stringify(itemPrimaryUnitsMap));
-
             var headerData = {};
-            var itemDetails = []
-            var filters = [];
-
-            // if (context.customer_id) {
-            //     filters.push(['entity', 'anyof', context.customer_id]);
-            // }
-            // if (context.start_date && context.end_date) {
-            //     filters.push('AND', ['trandate', 'within', context.start_date, context.end_date]);
-            // }
-
-
-            var headerIds = context.salesOrderHeaderId;
-            var itemids = context.salesOrderItemId;
-
-            // Load and apply filters for Item Level Search with pagination
-            var itemSearch = search.load({ id: 4904 });
-
-            var itemfilters = itemSearch.filters;
-            if (headerIds && headerIds.length > 0) {
-                //log.error("headerIds", headerIds);
-                try {
-
-                    itemfilters.push(search.createFilter({
-
-                        name: 'internalid',
-
-                        operator: search.Operator.ANYOF,
-
-                        values: headerIds
-
-                    }));
-
-
-                } catch (e) {
-
-                    log.error("error pushing item filters");
-
-                    var response = e.message + " - " + headerIds;
-
-                }
-
-            }
-
-            if (itemids && itemids.length > 0) {
-                // log.error("itemids", itemids);
-                try {
-
-                    itemfilters.push(search.createFilter({
-
-                        name: 'item',
-
-                        operator: search.Operator.ANYOF,
-
-                        values: itemids
-                    }));
-
-
-                } catch (e) {
-
-                    log.error("error pushing item filters");
-
-                    var response = e.message + " - " + headerIds;
-
-                }
-
-            }
-
-
-
-            itemSearch.filters = itemfilters;
             var cartonsIds = {};
-            // var itemSearchResult = itemSearch.run();
-            // var itemSearchRange = itemSearchResult.getRange({ start: startIndex, end: startIndex + pageSize });
-            var pagedData = itemSearch.runPaged({
-                pageSize: 1000
-            });
+            var soIds = [];
 
-            // Loop all pages
-            pagedData.pageRanges.forEach(function (pageRange) {
+            var itemSearch = search.load({ id: 5037 });
 
-                var page = pagedData.fetch({ index: pageRange.index });
-                page.data.forEach(function (result) {
+            var filters = itemSearch.filters || [];
 
-                    // log.error("Result line level", JSON.stringify(result));
-                    var internalID = result.id;
-                    //  log.error("internalID", internalID);
+            if (context.customer_id) {
+                filters.push(['entity', 'anyof', context.customer_id]);
+            }
 
-                    // Initialize carton counter for this internalID if not already set
-                    if (!cartonsIds[internalID]) {
-                        cartonsIds[internalID] = 1;
+            if (context.start_date && context.end_date) {
+                filters.push('AND', ['trandate', 'within', context.start_date, context.end_date]);
+            }
+
+            if (context.salesOrderHeaderId) {
+                filters.push('AND', ['internalid', 'anyof', context.salesOrderHeaderId]);
+            }
+
+            itemSearch.filters = filters;
+
+            var pagedData = itemSearch.runPaged({ pageSize: 1000 });
+
+            var totalCount = pagedData.count;
+            var totalPages = Math.ceil(totalCount / pageSize);
+
+            var start = startIndex || 0;
+            var end = start + pageSize;
+
+            var currentIndex = 0;
+            var pageResults = [];
+
+            // 🔥 STEP 1: GET ONLY REQUIRED RECORDS
+            outer:
+            for (var p = 0; p < pagedData.pageRanges.length; p++) {
+
+                var page = pagedData.fetch({ index: p });
+
+                for (var i = 0; i < page.data.length; i++) {
+
+                    if (currentIndex >= end) break outer;
+
+                    if (currentIndex >= start) {
+                        var result = page.data[i];
+                        pageResults.push(result);
+
+                        var soId = result.getValue('internalid');
+                        if (soId && soIds.indexOf(soId) === -1) {
+                            soIds.push(soId);
+                        }
                     }
 
-                    var itemValue = result.getValue({ name: 'item' });
+                    currentIndex++;
+                }
+            }
 
+            // 🔥 STEP 2: FETCH BIN DATA ONLY FOR PAGE
+            var binMap = getBinTransferMap(soIds);
 
-                    var itemData = {};
-                    itemPicked = false;
+            function safeInt(v) {
+                var n = parseInt(v);
+                return isNaN(n) ? "" : n;
+            }
 
-                    result.columns.forEach(function (column) {
+            // 🔥 STEP 3: PROCESS PAGE ONLY
+            for (var r = 0; r < pageResults.length; r++) {
 
-                        // log.error("result", JSON.stringify(result));
+                var result = pageResults[r];
+                var soId = result.getValue('internalid');
+                if (!soId) continue;
 
-                        var columnName = toSnakeCase(column.label || column.name);
-                        var columnValue = result.getText(column) || result.getValue(column);
+                if (!headerData[soId]) {
+                    headerData[soId] = {
+                        internal_id: soId,
+                        transaction_id: result.getValue('tranid'),
+                        status: result.getText('statusref'),
+                        customer_name: result.getText({ name: 'entityid', join: 'customer' }),
+                        location: result.getText('location'),
+                        ponumber: result.getValue('custbody13'),
+                        pro_number: result.getValue('custbody_bol_tracking_number'),
+                        priority: result.getValue('custbody_opt_ship_priority'),
+                        ship_date: result.getValue('shipdate'),
+                        order_date: result.getValue('trandate'),
+                        itemDetails: [],
+                        _addedKeys: {}
+                    };
 
+                    cartonsIds[soId] = 1;
+                }
 
+                var itemId = result.getValue('item');
+                var qty = parseInt(result.getValue('quantity')) || 0;
+                var unique_id = result.getValue('lineuniquekey');
 
-                        if (columnName === "unique_id") {
-                            itemData["unique_id"] = columnValue;
+                if (itemPrimaryUnitsMap[itemId]) {
+                    var rate = parseInt(itemPrimaryUnitsMap[itemId].rate || 1);
+                    if (rate > 0) qty = Math.floor(qty / rate);
+                }
 
-                        }
-                        else if (columnName === "so_items") {
+                var key = soId + "_" + itemId;
+                var existBinArr = binMap[key] || [{}];
 
-                            var str = result.getText(column) || result.getValue(column);
+                for (var b = 0; b < existBinArr.length; b++) {
 
-                            if (str) {
-                                // Split the string into an array and trim spaces
-                                var arr = str.split(";").map(function (s) { return s.trim(); });
+                    var bin = existBinArr[b];
 
-                                // Remove empty entries
-                                arr = arr.filter(function (s) { return s.length > 0; });
+                    var uniqueKey = itemId + "_" + (bin.binId || "");
+                    if (headerData[soId]._addedKeys[uniqueKey]) continue;
 
-                                var itemslength = arr.length;
-                                var lineItemLength = parseInt(result.getText({ name: 'quantity' }) || result.getValue({ name: 'quantity' })) || 0;
+                    headerData[soId]._addedKeys[uniqueKey] = true;
 
-                                var itemId = result.getValue({ name: 'item' });
+                    var car = safeInt(bin.quantity) || qty;
 
-                                var itemText = result.getText({ name: 'item' });
-                                var itemValue = result.getValue({ name: 'item' });
+                    var cartonInfo = [];
+                    for (var c = 0; c < car; c++) {
+                        cartonInfo.push(cartonsIds[soId]++ + " of " + car);
+                    }
 
-                                // Fallback logic (if needed)
-                                var itemDisplay = itemText || itemValue;
-
-
-
-                                // ----------------- Primary Unit Conversion -----------------
-                                if (itemPrimaryUnitsMap && itemPrimaryUnitsMap[itemId]) {
-
-                                    var itemObj = itemPrimaryUnitsMap[itemId];
-                                    // log.error("itemObj", itemObj);
-
-                                    var rate = parseInt(itemObj?.rate || 1);  // default 1 if missing
-                                    var unit = itemObj?.unit || '';
-
-                                    // Perform conversion safely
-                                    lineItemLength = parseInt(lineItemLength / rate);
-                                }
-
-                                var cartonInfo = [];
-                                var car = lineItemLength;
-
-                                if (!car || car <= 0) {
-
-                                    car = lineItemLength
-                                }
-
-                                for (var i = 0; i < car; i++) {
-                                    var num = cartonsIds[internalID];
-                                    var carton = num + " of " + itemslength;
-                                    cartonInfo.push(carton);
-                                    cartonsIds[internalID] = num + 1; // Increment within this order only
-                                }
-                                itemData["cartonInfo"] = cartonInfo;
-                                // Get unique values
-                                var uniqueArr = [];
-
-                                for (var i = 0; i < arr.length; i++) {
-                                    if (uniqueArr.indexOf(arr[i]) === -1) {
-                                        uniqueArr.push(arr[i]);
-                                    }
-                                }
-
-                                //  log.debug('Unique Items', uniqueArr);
-                                //  log.debug('Unique Count', uniqueArr.length);
-
-                                // If only one unique item, fetch amazon id
-                                if (uniqueArr.length === 1) {
-                                    var amazonId = result.getText({
-                                        name: "custitem129",
-                                        join: "item"
-                                    }) || result.getValue({
-                                        name: "custitem129",
-                                        join: "item"
-                                    });
-
-                                    itemData["asin_type_TEST"] = "SINGLE ASIN -" + amazonId;
-                                }
-                                else {
-                                    itemData["asin_type_TEST"] = "MIXED SKU";
-                                }
-                            }
-                        }
-                        else if (columnName == "amazon1yz7n_id") {
-                            itemData["asin_typ"] = "SINGLE ASIN " + (result.getText(column) || result.getValue(column));
-                        }
-                        else if (columnName == "ship_via") {
-                            itemData["shipMethodText"] = (result.getText(column) || result.getValue(column));
-                            itemData["shipMethodValue"] = (result.getValue(column) || result.getText(column));
-                        }
-                        else if (columnName == 'quantity') {
-
-
-                            var quantity = columnValue // parseInt(binObj.quantity || 0);
-                            var itemId = result.getValue({ name: 'item' });
-
-
-                            // ----------------- Primary Unit Conversion -----------------
-                            if (itemPrimaryUnitsMap && itemPrimaryUnitsMap[itemId]) {
-
-                                var itemObj = itemPrimaryUnitsMap[itemId];
-
-
-                                var rate = parseInt(itemObj?.rate || 1);  // default 1 if missing
-                                var unit = itemObj?.unit || '';
-
-                                // Perform conversion safely
-                                quantity = parseInt(quantity / rate);
-                                // quantity = Math.round(quantity / rate);
-
-                            }
-
-                            itemData["quantity"] = quantity;
-                            itemData["bin_id"] = "";
-                            itemData["bin_index"] = "";
-                            itemData["bin_name"] = " ";
-                            itemData["bin_transfer_internalid"] = "";
-                            itemData["item_quantity"] = quantity;// parseInt(binObj.quantity || 0);
-
-
-                        }
-                        else {
-                            itemData[columnName] = result.getText(column) || result.getValue(column);
-                        }
-
+                    headerData[soId].itemDetails.push({
+                        unique_id: unique_id + "_" + (bin.binIndex || (b + 1)),
+                        item: result.getText('item'),
+                        item_internalid: itemId,
+                        quantity: car,
+                        cartonInfo: cartonInfo,
+                        bin_id: safeInt(bin.binId),
+                        bin_index: safeInt(bin.binIndex),
+                        bin_name: bin.binNumber || "",
+                        bin_transfer_internalid: bin.internalId || "",
+                        item_quantity: qty,
+                        shipMethodText: result.getText('shipmethod'),
+                        shipMethodValue: result.getValue('shipmethod')
                     });
+                }
+            }
 
-                    //  log.error("itemData", itemData)
-                    itemDetails.push(itemData);
-
-
-                });
-
+            Object.keys(headerData).forEach(function (id) {
+                delete headerData[id]._addedKeys;
             });
-            return itemDetails;
 
-        }
-        catch (e) {
-            log.error("Error in getOrders function", e);
+            return {
+                status: 200,
+                message: 'Data retrieved successfully',
+                summary: {
+                    total_records: totalCount,
+                    total_pages: totalPages,
+                    records_per_page: pageSize,
+                    current_page: Math.floor(start / pageSize) + 1,
+                    pagination_info: {
+                        start_index: start,
+                        end_index: end - 1,
+                        has_next_page: end < totalCount,
+                        has_previous_page: start > 0
+                    }
+                },
+                data: headerData
+            };
 
+        } catch (e) {
+            log.error("FINAL ERROR", e);
             return {
                 status: 500,
                 message: e.message
             };
         }
+    }
+
+    function getBinTransferMap(soIds) {
+
+        var binMap = {};
+
+        if (!soIds || soIds.length === 0) return binMap;
+
+        var binSearch = search.create({
+            type: "customrecord_bin_transfer", // ⚠️ replace with your actual record
+            filters: [
+                ["custrecord_so_ref", "anyof", soIds]
+            ],
+            columns: [
+                "custrecord_so_ref",
+                "custrecord_item",
+                "custrecord_bin",
+                "custrecord_bin_qty",
+                "internalid"
+            ]
+        });
+
+        var pagedData = binSearch.runPaged({ pageSize: 1000 });
+
+        pagedData.pageRanges.forEach(function (range) {
+            var page = pagedData.fetch({ index: range.index });
+
+            page.data.forEach(function (r) {
+
+                var soId = r.getValue("custrecord_so_ref");
+                var itemId = r.getValue("custrecord_item");
+
+                var key = soId + "_" + itemId;
+
+                if (!binMap[key]) binMap[key] = [];
+
+                binMap[key].push({
+                    internalId: r.getValue("internalid"),
+                    binId: r.getValue("custrecord_bin"),
+                    binNumber: r.getText("custrecord_bin"),
+                    quantity: r.getValue("custrecord_bin_qty"),
+                    binIndex: binMap[key].length + 1
+                });
+            });
+        });
+
+        return binMap;
     }
 
 
@@ -4532,7 +4474,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
 
             // Load item-level search and apply filters
             // amazon dropship orders
-            var itemSearch = search.load({ id: 4798 });
+            var itemSearch = search.load({ id: 4798 }); //5023
 
             // non amazon dropship orders
             //    var itemSearch = search.load({ id: 4830 });
@@ -4591,7 +4533,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             // }
 
             itemSearch.filters = itemfilters;
-            log.error("itemSearch.filters", JSON.stringify(itemSearch.filters));
+            // log.error("itemSearch.filters", JSON.stringify(itemSearch.filters));
 
             if (filters.length > 0) {
                 itemSearch.filters = (itemSearch.filters || []).concat(filters);
@@ -6063,20 +6005,302 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
         return adj.save();
     }
 
+    // below function is added by sidd to use in userevents dont touch this.
+
+
     /**
-     * below function is added by sidd to use in userevents dont touch this.
-     * Optimized Drop Ship Order Retrieval
-     * Optimized for small number of Sales Orders
-     */
+ * Optimized Drop Ship Order Retrieval
+ * Keeps SAME output fields used by your current external system
+ * Optimized for small number of Sales Orders
+ */
 
+    // function getDropShipOrders_helperfunction(context, pageSize, startIndex) {
+
+    //     try {
+
+    //         var scriptObj = runtime.getCurrentScript();
+
+    //         var headerSearch = search.load({ id: 4797 });
+
+    //         var filters = [];
+
+    //         if (context.salesOrderHeaderId) {
+    //             filters.push(search.createFilter({
+    //                 name: "internalid",
+    //                 operator: search.Operator.ANYOF,
+    //                 values: context.salesOrderHeaderId
+    //             }));
+    //         }
+
+    //         if (filters.length) {
+    //             headerSearch.filters = (headerSearch.filters || []).concat(filters);
+    //         }
+
+    //         var headerResults = headerSearch.run().getRange({
+    //             start: startIndex || 0,
+    //             end: (startIndex || 0) + (pageSize || 100)
+    //         });
+
+    //         var headerData = {};
+    //         var headerIds = [];
+
+    //         headerResults.forEach(function (result) {
+
+    //             var internalId = result.getValue({ name: "internalid" });
+
+    //             headerIds.push(internalId);
+
+    //             var recordData = {};
+
+    //             result.columns.forEach(function (column) {
+
+    //                 var columnName = toSnakeCase(column.label || column.name);
+
+    //                 recordData[columnName] =
+    //                     result.getText(column) || result.getValue(column);
+
+    //             });
+
+    //             recordData.itemDetails = [];
+
+    //             headerData[internalId] = recordData;
+
+    //         });
+
+    //         /**
+    //          * Item Search
+    //          */
+
+    //         var itemSearch = search.load({ id: 4798 });
+
+    //         if (headerIds.length) {
+
+    //             itemSearch.filters.push(search.createFilter({
+    //                 name: "internalid",
+    //                 operator: search.Operator.ANYOF,
+    //                 values: headerIds
+    //             }));
+
+    //         }
+
+    //         var itemResults = itemSearch.run().getRange({
+    //             start: 0,
+    //             end: 1000
+    //         });
+
+    //         var cartonsIds = {};
+
+    //         itemResults.forEach(function (result) {
+
+    //             var internalId = result.getValue({ name: "internalid" });
+
+    //             if (!headerData[internalId]) return;
+
+    //             if (!cartonsIds[internalId]) cartonsIds[internalId] = 1;
+
+    //             var baseItemData = {};
+
+    //             var lineQuantityRaw = 0;
+
+    //             var parsedSoItemsArr = [];
+
+    //             var so_items_str = "";
+
+    //             var item_internalid = result.getValue({ name: "item" });
+
+    //             var unique_id_val = "";
+
+    //             result.columns.forEach(function (column) {
+
+    //                 var columnName = toSnakeCase(column.label || column.name);
+
+    //                 var valueText = result.getText(column) || result.getValue(column);
+
+    //                 if (columnName === "quantity") {
+
+    //                     lineQuantityRaw = parseInt(valueText) || 0;
+
+    //                 }
+
+    //                 if (columnName === "so_items") {
+
+    //                     so_items_str = valueText || "";
+
+    //                     if (so_items_str) {
+
+    //                         parsedSoItemsArr = so_items_str
+    //                             .split(";")
+    //                             .map(function (s) { return s.trim(); })
+    //                             .filter(function (s) { return s.length > 0; });
+
+    //                     }
+
+    //                     baseItemData["so_items"] = parsedSoItemsArr.length;
+
+    //                 }
+
+    //                 else if (columnName === "unique_id") {
+
+    //                     unique_id_val = valueText || "";
+
+    //                     baseItemData["unique_id"] = valueText || "";
+
+    //                 }
+
+    //                 else if (columnName === "ship_via") {
+
+    //                     baseItemData["shipMethodText"] = result.getText(column);
+
+    //                     baseItemData["shipMethodValue"] = result.getValue(column);
+
+    //                 }
+
+    //                 else if (columnName === "item_types") {
+
+    //                     var typeValue = (valueText || "").toLowerCase().trim();
+
+    //                     if (typeValue === "rug") {
+
+    //                         baseItemData["item_types"] = "Rug";
+
+    //                     } else if (
+    //                         typeValue === "box" ||
+    //                         typeValue === "small" ||
+    //                         typeValue === "boxes"
+    //                     ) {
+
+    //                         baseItemData["item_types"] = "Box";
+
+    //                     } else if (typeValue === "oversize") {
+
+    //                         baseItemData["item_types"] = "Oversize";
+
+    //                     } else {
+
+    //                         baseItemData["item_types"] = "";
+
+    //                     }
+
+    //                 }
+
+    //                 else {
+
+    //                     baseItemData[columnName] = valueText;
+
+    //                 }
+
+    //             });
+
+    //             /**
+    //              * Bin transfer logic
+    //              */
+
+    //             var existBinArr = getBinTransferinfo(result, itemPrimaryUnits());
+
+    //             if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
+
+    //                 existBinArr = [{
+    //                     internalId: "",
+    //                     binId: "",
+    //                     binNumber: "",
+    //                     relatedSalesOrder: "",
+    //                     item: "",
+    //                     quantity: "",
+    //                     binIndex: ""
+    //                 }];
+
+    //             }
+
+    //             if (!headerData[internalId]._addedKeys)
+    //                 headerData[internalId]._addedKeys = {};
+
+    //             for (var b = 0; b < existBinArr.length; b++) {
+
+    //                 var binObj = existBinArr[b];
+
+    //                 var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
+
+    //                 if (headerData[internalId]._addedKeys[uniqueKey]) continue;
+
+    //                 headerData[internalId]._addedKeys[uniqueKey] = true;
+
+    //                 var itemData = Object.assign({}, baseItemData);
+
+    //                 var uniqueIdToSet = unique_id_val
+    //                     ? unique_id_val + "_" + (binObj.binIndex || (b + 1))
+    //                     : item_internalid + "_" + (binObj.binIndex || (b + 1));
+
+    //                 itemData["unique_id"] = uniqueIdToSet;
+
+    //                 itemData["quantity"] = parseInt(binObj.quantity || lineQuantityRaw);
+
+    //                 itemData["bin_id"] = binObj.binId || "";
+
+    //                 itemData["bin_index"] = binObj.binIndex || "";
+
+    //                 itemData["bin_name"] = binObj.binNumber || "";
+
+    //                 itemData["bin_transfer_internalid"] = binObj.internalId || "";
+
+    //                 headerData[internalId].itemDetails.push(itemData);
+
+    //             }
+
+    //         });
+
+    //         /**
+    //          * Remove internal tracking key
+    //          */
+
+    //         Object.keys(headerData).forEach(function (id) {
+
+    //             delete headerData[id]._addedKeys;
+
+    //         });
+
+    //         return {
+
+    //             status: 200,
+
+    //             message: "Data retrieved successfully",
+
+    //             summary: {
+
+    //                 total_records: headerIds.length,
+
+    //                 records_per_page: pageSize,
+
+    //                 current_page: Math.floor(startIndex / pageSize) + 1
+
+    //             },
+
+    //             data: headerData
+
+    //         };
+
+    //     }
+
+    //     catch (e) {
+
+    //         log.error("Error in getDropShipOrders", e);
+
+    //         return {
+
+    //             status: 500,
+
+    //             message: e.message
+
+    //         };
+
+    //     }
+
+    // }
+
+    // Changed the parameter from startIndex to pageNumber
     function getDropShipOrders_helperfunction(context, pageSize, startIndex) {
-
         try {
-
             var scriptObj = runtime.getCurrentScript();
-
             var headerSearch = search.load({ id: 4797 });
-
             var filters = [];
 
             if (context.salesOrderHeaderId) {
@@ -6091,268 +6315,234 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                 headerSearch.filters = (headerSearch.filters || []).concat(filters);
             }
 
-            var headerResults = headerSearch.run().getRange({
-                start: startIndex || 0,
-                end: (startIndex || 0) + (pageSize || 100)
-            });
+            // 1. Setup Pagination Limits (Page Number Logic)
+            var pSize = context.pageSize || context.page_size || pageSize;
+            var reqPage = context.startIndex || context.page_number || startIndex;
+            log.error("Pagination Params", { pageSize: pSize, startIndex: reqPage });
+            var limit = pSize ? parseInt(pSize, 10) : 1000;
+            if (limit > 1000) limit = 1000; // NetSuite's max allowed page size
+
+            // Convert 1-based page number to NetSuite's 0-based page index
+            var parsedPage = reqPage ? parseInt(reqPage, 10) : 1;
+            var pageIndex = (parsedPage > 0) ? (parsedPage - 1) : 0;
+
+            // 2. Run Paged Search on Headers
+            var headerPagedData = headerSearch.runPaged({ pageSize: limit });
+            var totalRecords = headerPagedData.count;
+            var totalPages = headerPagedData.pageRanges.length;
 
             var headerData = {};
             var headerIds = [];
+            var headerColMap = null;
+            var fetchedRecordsCount = 0;
 
-            headerResults.forEach(function (result) {
+            // If no records or requested page is out of bounds, return early
+            if (totalRecords === 0 || pageIndex >= totalPages) {
+                return generateResponse(200, "No data found", totalRecords, limit, pageIndex, totalPages, 0, headerData);
+            }
 
+            // 3. Fetch ONLY the specific page requested
+            var page = headerPagedData.fetch({ index: pageIndex });
+            fetchedRecordsCount = page.data.length;
+
+            page.data.forEach(function (result) {
                 var internalId = result.getValue({ name: "internalid" });
-
                 headerIds.push(internalId);
 
                 var recordData = {};
 
-                result.columns.forEach(function (column) {
+                if (!headerColMap) {
+                    headerColMap = result.columns.map(function (column) {
+                        return {
+                            col: column,
+                            snakeName: toSnakeCase(column.label || column.name)
+                        };
+                    });
+                }
 
-                    var columnName = toSnakeCase(column.label || column.name);
-
-                    recordData[columnName] =
-                        result.getText(column) || result.getValue(column);
-
-                });
+                for (var i = 0; i < headerColMap.length; i++) {
+                    var mapObj = headerColMap[i];
+                    recordData[mapObj.snakeName] = result.getText(mapObj.col) || result.getValue(mapObj.col);
+                }
 
                 recordData.itemDetails = [];
-
+                recordData._addedKeys = {};
                 headerData[internalId] = recordData;
-
             });
 
             /**
              * Item Search
              */
-
             var itemSearch = search.load({ id: 4798 });
+            itemSearch.filters.push(search.createFilter({
+                name: "internalid",
+                operator: search.Operator.ANYOF,
+                values: headerIds
+            }));
 
-            if (headerIds.length) {
+            var primaryUnitsCache = typeof itemPrimaryUnits === 'function' ? itemPrimaryUnits() : null;
+            var cartonsIds = {};
+            var itemColMap = null;
 
-                itemSearch.filters.push(search.createFilter({
-                    name: "internalid",
-                    operator: search.Operator.ANYOF,
-                    values: headerIds
-                }));
+            var itemPagedData = itemSearch.runPaged({ pageSize: 1000 });
 
+            itemPagedData.pageRanges.forEach(function (pageRange) {
+                var itemPage = itemPagedData.fetch({ index: pageRange.index });
+
+                itemPage.data.forEach(function (result) {
+                    var internalId = result.getValue({ name: "internalid" });
+
+                    if (!headerData[internalId]) return;
+                    if (!cartonsIds[internalId]) cartonsIds[internalId] = 1;
+
+                    var baseItemData = {};
+                    var lineQuantityRaw = 0;
+                    var so_items_str = "";
+                    var unique_id_val = "";
+                    var item_internalid = result.getValue({ name: "item" });
+
+                    if (!itemColMap) {
+                        itemColMap = result.columns.map(function (column) {
+                            return {
+                                col: column,
+                                snakeName: toSnakeCase(column.label || column.name)
+                            };
+                        });
+                    }
+
+                    for (var i = 0; i < itemColMap.length; i++) {
+                        var mapObj = itemColMap[i];
+                        var columnName = mapObj.snakeName;
+                        var valueText = result.getText(mapObj.col) || result.getValue(mapObj.col);
+
+                        if (columnName === "quantity") {
+                            lineQuantityRaw = parseInt(valueText, 10) || 0;
+                        }
+                        else if (columnName === "so_items") {
+                            so_items_str = valueText || "";
+                            var parsedSoItemsCount = 0;
+                            if (so_items_str) {
+                                var splitArr = so_items_str.split(";");
+                                for (var s = 0; s < splitArr.length; s++) {
+                                    if (splitArr[s].trim().length > 0) parsedSoItemsCount++;
+                                }
+                            }
+                            baseItemData["so_items"] = parsedSoItemsCount;
+                        }
+                        else if (columnName === "unique_id") {
+                            unique_id_val = valueText || "";
+                            baseItemData["unique_id"] = unique_id_val;
+                        }
+                        else if (columnName === "ship_via") {
+                            baseItemData["shipMethodText"] = result.getText(mapObj.col);
+                            baseItemData["shipMethodValue"] = result.getValue(mapObj.col);
+                        }
+                        else if (columnName === "item_types") {
+                            var typeValue = (valueText || "").toLowerCase().trim();
+                            if (typeValue === "rug") {
+                                baseItemData["item_types"] = "Rug";
+                            } else if (typeValue === "box" || typeValue === "small" || typeValue === "boxes") {
+                                baseItemData["item_types"] = "Box";
+                            } else if (typeValue === "oversize") {
+                                baseItemData["item_types"] = "Oversize";
+                            } else {
+                                baseItemData["item_types"] = "";
+                            }
+                        }
+                        else {
+                            baseItemData[columnName] = valueText;
+                        }
+                    }
+
+                    /**
+                     * Bin transfer logic
+                     */
+                    var existBinArr = typeof getBinTransferinfo === 'function' ? getBinTransferinfo(result, primaryUnitsCache) : [];
+
+                    if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
+                        existBinArr = [{
+                            internalId: "", binId: "", binNumber: "", relatedSalesOrder: "",
+                            item: "", quantity: "", binIndex: ""
+                        }];
+                    }
+
+                    for (var b = 0; b < existBinArr.length; b++) {
+                        var binObj = existBinArr[b];
+                        var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
+
+                        if (headerData[internalId]._addedKeys[uniqueKey]) continue;
+
+                        headerData[internalId]._addedKeys[uniqueKey] = true;
+
+                        var itemData = {};
+                        for (var key in baseItemData) {
+                            if (baseItemData.hasOwnProperty(key)) {
+                                itemData[key] = baseItemData[key];
+                            }
+                        }
+
+                        var uniqueIdToSet = unique_id_val
+                            ? unique_id_val + "_" + (binObj.binIndex || (b + 1))
+                            : item_internalid + "_" + (binObj.binIndex || (b + 1));
+
+                        itemData["unique_id"] = uniqueIdToSet;
+
+                        itemData["quantity"] = parseInt(binObj.quantity || lineQuantityRaw, 10);
+                        itemData["item_quantity"] = itemData["quantity"];
+
+                        itemData["cartonInfo"] = ["1 of 1"];
+                        itemData["asin_type_TEST"] = (itemData["asin_type"] || "") + " -";
+
+                        itemData["bin_id"] = binObj.binId || "";
+                        itemData["bin_index"] = binObj.binIndex || "";
+                        itemData["bin_name"] = binObj.binNumber || "";
+                        itemData["bin_transfer_internalid"] = binObj.internalId || "";
+
+                        headerData[internalId].itemDetails.push(itemData);
+                    }
+                });
+            });
+
+            for (var id in headerData) {
+                if (headerData.hasOwnProperty(id)) {
+                    delete headerData[id]._addedKeys;
+                }
             }
 
-            var itemResults = itemSearch.run().getRange({
-                start: 0,
-                end: 1000
-            });
+            return generateResponse(200, "Data retrieved successfully", totalRecords, limit, pageIndex, totalPages, fetchedRecordsCount, headerData);
 
-            var cartonsIds = {};
-
-            itemResults.forEach(function (result) {
-
-                var internalId = result.getValue({ name: "internalid" });
-
-                if (!headerData[internalId]) return;
-
-                if (!cartonsIds[internalId]) cartonsIds[internalId] = 1;
-
-                var baseItemData = {};
-
-                var lineQuantityRaw = 0;
-
-                var parsedSoItemsArr = [];
-
-                var so_items_str = "";
-
-                var item_internalid = result.getValue({ name: "item" });
-
-                var unique_id_val = "";
-
-                result.columns.forEach(function (column) {
-
-                    var columnName = toSnakeCase(column.label || column.name);
-
-                    var valueText = result.getText(column) || result.getValue(column);
-
-                    if (columnName === "quantity") {
-
-                        lineQuantityRaw = parseInt(valueText) || 0;
-
-                    }
-
-                    if (columnName === "so_items") {
-
-                        so_items_str = valueText || "";
-
-                        if (so_items_str) {
-
-                            parsedSoItemsArr = so_items_str
-                                .split(";")
-                                .map(function (s) { return s.trim(); })
-                                .filter(function (s) { return s.length > 0; });
-
-                        }
-
-                        baseItemData["so_items"] = parsedSoItemsArr.length;
-
-                    }
-
-                    else if (columnName === "unique_id") {
-
-                        unique_id_val = valueText || "";
-
-                        baseItemData["unique_id"] = valueText || "";
-
-                    }
-
-                    else if (columnName === "ship_via") {
-
-                        baseItemData["shipMethodText"] = result.getText(column);
-
-                        baseItemData["shipMethodValue"] = result.getValue(column);
-
-                    }
-
-                    else if (columnName === "item_types") {
-
-                        var typeValue = (valueText || "").toLowerCase().trim();
-
-                        if (typeValue === "rug") {
-
-                            baseItemData["item_types"] = "Rug";
-
-                        } else if (
-                            typeValue === "box" ||
-                            typeValue === "small" ||
-                            typeValue === "boxes"
-                        ) {
-
-                            baseItemData["item_types"] = "Box";
-
-                        } else if (typeValue === "oversize") {
-
-                            baseItemData["item_types"] = "Oversize";
-
-                        } else {
-
-                            baseItemData["item_types"] = "";
-
-                        }
-
-                    }
-
-                    else {
-
-                        baseItemData[columnName] = valueText;
-
-                    }
-
-                });
-
-                /**
-                 * Bin transfer logic
-                 */
-
-                var existBinArr = getBinTransferinfo(result, itemPrimaryUnits());
-
-                if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
-
-                    existBinArr = [{
-                        internalId: "",
-                        binId: "",
-                        binNumber: "",
-                        relatedSalesOrder: "",
-                        item: "",
-                        quantity: "",
-                        binIndex: ""
-                    }];
-
-                }
-
-                if (!headerData[internalId]._addedKeys)
-                    headerData[internalId]._addedKeys = {};
-
-                for (var b = 0; b < existBinArr.length; b++) {
-
-                    var binObj = existBinArr[b];
-
-                    var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
-
-                    if (headerData[internalId]._addedKeys[uniqueKey]) continue;
-
-                    headerData[internalId]._addedKeys[uniqueKey] = true;
-
-                    var itemData = Object.assign({}, baseItemData);
-
-                    var uniqueIdToSet = unique_id_val
-                        ? unique_id_val + "_" + (binObj.binIndex || (b + 1))
-                        : item_internalid + "_" + (binObj.binIndex || (b + 1));
-
-                    itemData["unique_id"] = uniqueIdToSet;
-
-                    itemData["quantity"] = parseInt(binObj.quantity || lineQuantityRaw);
-
-                    itemData["bin_id"] = binObj.binId || "";
-
-                    itemData["bin_index"] = binObj.binIndex || "";
-
-                    itemData["bin_name"] = binObj.binNumber || "";
-
-                    itemData["bin_transfer_internalid"] = binObj.internalId || "";
-
-                    headerData[internalId].itemDetails.push(itemData);
-
-                }
-
-            });
-
-            /**
-             * Remove internal tracking key
-             */
-
-            Object.keys(headerData).forEach(function (id) {
-
-                delete headerData[id]._addedKeys;
-
-            });
-
-            return {
-
-                status: 200,
-
-                message: "Data retrieved successfully",
-
-                summary: {
-
-                    total_records: headerIds.length,
-
-                    records_per_page: pageSize,
-
-                    current_page: Math.floor(startIndex / pageSize) + 1
-
-                },
-
-                data: headerData
-
-            };
-
-        }
-
-        catch (e) {
-
+        } catch (e) {
             log.error("Error in getDropShipOrders", e);
-
-            return {
-
-                status: 500,
-
-                message: e.message
-
-            };
-
+            return { status: 500, message: e.message };
         }
-
     }
 
+    // Helper function that calculates boundaries perfectly based on pageIndex
+    function generateResponse(status, message, totalRecords, pageSize, pageIndex, totalPages, dataCount, data) {
+        // Ex: Page 2 (index 1) * 1000 = 1000.
+        var calcStartIndex = pageIndex * pageSize;
 
+        // Ex: 1000 + (1000 - 1) = 1999.
+        var calcEndIndex = calcStartIndex + (dataCount > 0 ? dataCount - 1 : 0);
 
+        return {
+            status: status,
+            message: message,
+            summary: {
+                total_records: totalRecords,
+                total_pages: totalPages === 0 ? 1 : totalPages,
+                records_per_page: pageSize,
+                current_page: totalPages === 0 ? 1 : pageIndex + 1, // Converts 0-index back to 1-index for UI
+                pagination_info: {
+                    start_index: calcStartIndex,
+                    end_index: calcEndIndex,
+                    has_next_page: pageIndex < (totalPages - 1),
+                    has_previous_page: pageIndex > 0
+                }
+            },
+            data: data
+        };
+    }
 
 
 
@@ -6373,6 +6563,6 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
         createImageFile: createImageFile,
         processInbound: processInbound,
         getDropShipOrders_partials: getDropShipOrders_partials,
-        getDropShipOrders_helperfunction: getDropShipOrders_helperfunction
+        getDropShipOrders_helperfunction: getDropShipOrders_helperfunction,
     };
 });

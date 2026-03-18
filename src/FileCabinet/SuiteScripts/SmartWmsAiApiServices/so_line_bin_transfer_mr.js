@@ -65,7 +65,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log'], function (search, record,
         var parts = clean.split("@@");
 
         if (parts.length < 3) {
-            log.error("Invalid binDetails format", binDetails);
+           // log.error("Invalid binDetails format", binDetails);
             return;
         }
 
@@ -74,7 +74,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log'], function (search, record,
         var qty = parseFloat(parts[2]);
 
         if (!itemId || !fromBin || isNaN(qty)) {
-            log.error("Invalid parsed data", parts);
+         //   log.error("Invalid parsed data", parts);
             return;
         }
 
@@ -225,12 +225,12 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log'], function (search, record,
         log.audit("Yields", summary.yields);
 
         summary.mapSummary.errors.iterator().each(function (key, error) {
-            log.error("Map Error for key " + key, error);
+           // log.error("Map Error for key " + key, error);
             return true;
         });
 
         summary.reduceSummary.errors.iterator().each(function (key, error) {
-            log.error("Reduce Error for key " + key, error);
+          // log.error("Reduce Error for key " + key, error);
             return true;
         });
     }

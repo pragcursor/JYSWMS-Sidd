@@ -2,61 +2,61 @@
  * @NApiVersion 2.x
  * @NModuleScope Public
  */
-define(['N/record', 'N/search', 'N/log','N/runtime'], function (record, search, log, runtime) {
+define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search, log, runtime) {
 
 
-  //  return {
-  //       binCount: binCount,
-  //       binAdjustment: binAdjustment,
-  //       binTransfer: binTransfer,
-  //       getBinInventoryDetail: getBinInventoryDetail,
-		// getBins : getBins
-  //   };
+    //  return {
+    //       binCount: binCount,
+    //       binAdjustment: binAdjustment,
+    //       binTransfer: binTransfer,
+    //       getBinInventoryDetail: getBinInventoryDetail,
+    // getBins : getBins
+    //   };
 
-      function binCount(data,customRecId) {
+    function binCount(data, customRecId) {
         var results = [];
-        log.error("Data -- bin count", JSON.stringify(data, customRecId));
+        // log.error("Data -- bin count", JSON.stringify(data, customRecId));
 
         try {
             var customRecId = customRecId;
             var binId = data.binId;
             var locationId = data.location;
 
-            try{
-        
-          if (binId) {
-    var lookup = search.lookupFields({
-        type: 'bin',
-        id: binId,
-        columns: ['isinactive']
-    });
+            try {
 
-    var isInactive = lookup.isinactive; // boolean true/false
+                if (binId) {
+                    var lookup = search.lookupFields({
+                        type: 'bin',
+                        id: binId,
+                        columns: ['isinactive']
+                    });
 
-    // If bin is inactive, make it active
-    if (isInactive === true) {
-        record.submitFields({
-            type: 'bin',
-            id: binId,
-            values: {
-                isinactive: false
+                    var isInactive = lookup.isinactive; // boolean true/false
+
+                    // If bin is inactive, make it active
+                    if (isInactive === true) {
+                        record.submitFields({
+                            type: 'bin',
+                            id: binId,
+                            values: {
+                                isinactive: false
+                            }
+                        });
+                    }
+                }
+            } catch (e) {
+
+                log.error("Error in bincount", e);
             }
-        });
-    }
-}
-  }catch(e){
 
-            log.error("error message in bincount", e.message)
-  }
 
-          
             // locationId = data.location;
-          
+
             var locationName = data.locationName;
             var bulkStageBin = "";
 
-            if (locationId == 0 || locationId == null || locationId == '' || locationId == 'undefined'||  locationId == 9 ||   locationId == 15  ) {
-                if (locationName == 'Flemington L41' ||  locationId == 9 ) {
+            if (locationId == 0 || locationId == null || locationId == '' || locationId == 'undefined' || locationId == 9 || locationId == 15) {
+                if (locationName == 'Flemington L41' || locationId == 9) {
                     locationId = 9;
                     bulkStageBin = 4859;
                 }
@@ -69,20 +69,20 @@ define(['N/record', 'N/search', 'N/log','N/runtime'], function (record, search, 
             var itemData = data.itemData || [];
             var pickerName = data.userName || data.username || "";
 
-             var existingQuantitiesMap = binSearch(binId);
+            var existingQuantitiesMap = binSearch(binId);
 
             log.debug("existingQuantitiesMap", JSON.stringify(existingQuantitiesMap));
-                
-             var existingBulkBinQuantitiesMap = binSearch(bulkStageBin);
-          
+
+            var existingBulkBinQuantitiesMap = binSearch(bulkStageBin);
+
             log.debug("existingBulkBinQuantitiesMap", JSON.stringify(existingBulkBinQuantitiesMap))
 
-            
+
             // Step 2: Build adjustments
 
             var bulkBinItemQtymap = fetchBulkStageBinTracking(binId);
 
-           log.debug("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
+            log.debug("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
 
             var adjustmentsToMake = [];
 
@@ -98,21 +98,21 @@ define(['N/record', 'N/search', 'N/log','N/runtime'], function (record, search, 
                 var countedQty = Number(entry.quantity) || 0;  //50
 
                 var currentBinQty = Number(existingQuantitiesMap[itemId]) || 0; //20
-             
+
                 var bulkBinQTy = Number(bulkBinItemQtymap[itemId]?.on_hand || 0);
 
                 var totalQty = Number(currentBinQty) + bulkBinQTy; //35
                 var adjustmentQty = totalQty - countedQty; //35-50=-15
 
-log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + currentBinQty + ",bulkBinQTy=" + bulkBinQTy + ",totalQty=" + totalQty + ",diff=" + adjustmentQty);
+                log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + currentBinQty + ",bulkBinQTy=" + bulkBinQTy + ",totalQty=" + totalQty + ",diff=" + adjustmentQty);
 
                 // differnce is less than 0 then 0 and greater than currentQty then adjsut the bulkStageQty
                 if (adjustmentQty <= currentBinQty) {
-                  
+
                     log.debug("Adjust from regular bin Qty : ", adjustmentQty);
-                  
+
                     if (Number(adjustmentQty) != 0) {
-                      
+
                         // Adjust from regular bin
                         adjustmentsToMake.push({
                             itemId: itemId,
@@ -120,7 +120,7 @@ log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + current
                             locationId: locationId,
                             binId: binId,
                         });
-                      
+
                     }
                 }
                 else {
@@ -136,7 +136,7 @@ log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + current
                         });
                     }
 
-         // existing bullk 10 bulkBinAdjustQty 5
+                    // existing bullk 10 bulkBinAdjustQty 5
 
                     if (Number(bulkBinAdjustQty) != 0) {
                         if (Number(existingBulkBinQuantitiesMap[itemId]) >= Number(bulkBinAdjustQty)) {
@@ -159,7 +159,7 @@ log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + current
 
             });
 
-           // log.error("item data", JSON.stringify(adjustmentsToMake));
+            // // log.error("item data", JSON.stringify(adjustmentsToMake));
 
             // Step 3: Add adjustments for items not in input but existing in bin
 
@@ -191,7 +191,7 @@ log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + current
             });
 
 
-         //   log.error("existing Quantity", JSON.stringify(adjustmentsToMake));
+            //   // log.error("existing Quantity", JSON.stringify(adjustmentsToMake));
 
             // Step 3: Create inventory adjustment if needed
             if (adjustmentsToMake.length === 0) {
@@ -227,130 +227,130 @@ log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + current
 
 
             adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-         //   adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername',value: pickerName+ " via Portal-"+data.portalId|| '' });
+            //   adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername',value: pickerName+ " via Portal-"+data.portalId|| '' });
 
-          var finalPickerName = '';
+            var finalPickerName = '';
 
-if (pickerName || data.portalId) {
-    finalPickerName = (pickerName || '') +
-        (data.portalId ? ' via Portal-' + data.portalId : '');
-}
+            if (pickerName || data.portalId) {
+                finalPickerName = (pickerName || '') +
+                    (data.portalId ? ' via Portal-' + data.portalId : '');
+            }
 
-adjustmentRecord.setValue({
-    fieldId: 'custbody_wms_ai_pickername',
-    value: finalPickerName
-});
+            adjustmentRecord.setValue({
+                fieldId: 'custbody_wms_ai_pickername',
+                value: finalPickerName
+            });
 
             adjustmentsToMake.forEach(function (adjustment) {
                 try {
 
-                adjustmentRecord.setValue({ fieldId: 'adjlocation', value: adjustment.locationId });
+                    adjustmentRecord.setValue({ fieldId: 'adjlocation', value: adjustment.locationId });
 
 
 
-                adjustmentRecord.selectNewLine({ sublistId: 'inventory' });
+                    adjustmentRecord.selectNewLine({ sublistId: 'inventory' });
 
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'item',
-                    value: adjustment.itemId
-                });
+                    adjustmentRecord.setCurrentSublistValue({
+                        sublistId: 'inventory',
+                        fieldId: 'item',
+                        value: adjustment.itemId
+                    });
 
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'location',
-                    value: adjustment.locationId
-                });
+                    adjustmentRecord.setCurrentSublistValue({
+                        sublistId: 'inventory',
+                        fieldId: 'location',
+                        value: adjustment.locationId
+                    });
 
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'adjustqtyby',
-                    value: adjustment.quantity
-                });
+                    adjustmentRecord.setCurrentSublistValue({
+                        sublistId: 'inventory',
+                        fieldId: 'adjustqtyby',
+                        value: adjustment.quantity
+                    });
 
-                var inventoryDetail = adjustmentRecord.getCurrentSublistSubrecord({
-                    sublistId: 'inventory',
-                    fieldId: 'inventorydetail'
-                });
+                    var inventoryDetail = adjustmentRecord.getCurrentSublistSubrecord({
+                        sublistId: 'inventory',
+                        fieldId: 'inventorydetail'
+                    });
 
-                inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
+                    inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
 
-                inventoryDetail.setCurrentSublistValue({
-                    sublistId: 'inventoryassignment',
-                    fieldId: 'binnumber',
-                    value: parseInt(adjustment.binId, 10)
-                });
+                    inventoryDetail.setCurrentSublistValue({
+                        sublistId: 'inventoryassignment',
+                        fieldId: 'binnumber',
+                        value: parseInt(adjustment.binId, 10)
+                    });
 
-                inventoryDetail.setCurrentSublistValue({
-                    sublistId: 'inventoryassignment',
-                    fieldId: 'quantity',
-                    value: adjustment.quantity
-                });
+                    inventoryDetail.setCurrentSublistValue({
+                        sublistId: 'inventoryassignment',
+                        fieldId: 'quantity',
+                        value: adjustment.quantity
+                    });
 
-                inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
-                adjustmentRecord.commitLine({ sublistId: 'inventory' });
+                    inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
+                    adjustmentRecord.commitLine({ sublistId: 'inventory' });
 
-                //  adjustmentRecord.setValue({fieldId: 'account', value: account });
-            
-            } catch (itemErr) {
-      log.error('Error processing item', itemErr.message);
+                    //  adjustmentRecord.setValue({fieldId: 'account', value: account });
 
-          results.push({
-            itemId: adjustment,
-            success: false,
-            message: itemErr.message
-          });
-                  }
-            
-               
-                });
+                } catch (itemErr) {
+                    log.error('Error processing item', itemErr.message);
+
+                    results.push({
+                        itemId: adjustment,
+                        success: false,
+                        message: itemErr.message
+                    });
+                }
+
+
+            });
             //adjustmentRecord.setValue({fieldId: 'account', value: account });
 
-        const hasErrors = results.length > 0;
-      let invAdjId = null;
+            const hasErrors = results.length > 0;
+            let invAdjId = null;
 
-      if (!hasErrors) {
-        invAdjId = adjustmentRecord.save({ enableSourcing: true, ignoreMandatoryFields: true });
-        log.error("invAdjId:", invAdjId);
-            
-        if (customRecId) {
-          record.submitFields({
-            type: 'customrecord_wms_ai_api_custom_rec',
-            id: customRecId,
-            values: {
-              custrecordwms_ai_api_custrec_rel_trans: invAdjId,
-              custrecordwms_ai_api_custrec_error: "Inventory Adjustment Id created successfully\nID:"+invAdjId,
-              custrecord_wms_ai_api_custrec_status: 2,
-              custrecord_wms_ai_api_custrec_processing : false
-              
+            if (!hasErrors) {
+                invAdjId = adjustmentRecord.save({ enableSourcing: true, ignoreMandatoryFields: true });
+                // log.error("invAdjId:", invAdjId);
+
+                if (customRecId) {
+                    record.submitFields({
+                        type: 'customrecord_wms_ai_api_custom_rec',
+                        id: customRecId,
+                        values: {
+                            custrecordwms_ai_api_custrec_rel_trans: invAdjId,
+                            custrecordwms_ai_api_custrec_error: "Inventory Adjustment Id created successfully\nID:" + invAdjId,
+                            custrecord_wms_ai_api_custrec_status: 2,
+                            custrecord_wms_ai_api_custrec_processing: false
+
+                        }
+                    });
+                }
+
+                return {
+                    success: true,
+                    message: 'inventory AdjustmentId created successfully',
+                    inventoryAdjustmentId: invAdjId
+                };
+            } else {
+                if (customRecId) {
+                    record.submitFields({
+                        type: 'customrecord_wms_ai_api_custom_rec',
+                        id: customRecId,
+                        values: {
+                            custrecordwms_ai_api_custrec_error: JSON.stringify(results),
+                            custrecord_wms_ai_api_custrec_status: 3,
+                            custrecord_wms_ai_api_custrec_processing: false
+                        }
+                    });
+                }
+
+                return {
+                    success: false,
+                    message: results
+                };
+
             }
-          });
-        }
-
-        return {
-          success: true,
-          message: 'inventory AdjustmentId created successfully',
-          inventoryAdjustmentId: invAdjId
-        };
-      } else {  
-        if (customRecId) {
-          record.submitFields({
-            type: 'customrecord_wms_ai_api_custom_rec',
-            id: customRecId,
-            values: {
-              custrecordwms_ai_api_custrec_error: JSON.stringify(results),
-              custrecord_wms_ai_api_custrec_status: 3,
-              custrecord_wms_ai_api_custrec_processing : false
-            }
-          });
-        }
-
-        return {
-          success: false,
-          message: results
-        };
-
-      }
 
         } catch (e) {
 
@@ -373,12 +373,12 @@ adjustmentRecord.setValue({
     }
 
 
-  
-      function binAdjustment(data,customRecId) {
+
+    function binAdjustment(data, customRecId) {
         var results = [];
         var itemDetails = [];
 
-    log.debug("Input Data", JSON.stringify(data));
+        log.debug("Input Data", JSON.stringify(data));
 
         try {
             var binId = data.binId;
@@ -387,36 +387,36 @@ adjustmentRecord.setValue({
             var bulkStageBin = "";
 
 
-          try{
-        
-          if (binId) {
-    var lookup = search.lookupFields({
-        type: 'bin',
-        id: binId,
-        columns: ['isinactive']
-    });
+            try {
 
-    var isInactive = lookup.isinactive; // boolean true/false
+                if (binId) {
+                    var lookup = search.lookupFields({
+                        type: 'bin',
+                        id: binId,
+                        columns: ['isinactive']
+                    });
 
-    // If bin is inactive, make it active
-    if (isInactive === true) {
-        record.submitFields({
-            type: 'bin',
-            id: binId,
-            values: {
-                isinactive: false
+                    var isInactive = lookup.isinactive; // boolean true/false
+
+                    // If bin is inactive, make it active
+                    if (isInactive === true) {
+                        record.submitFields({
+                            type: 'bin',
+                            id: binId,
+                            values: {
+                                isinactive: false
+                            }
+                        });
+                    }
+                }
+            } catch (e) {
+
+                log.error("Error in bin lookup or update", e.message);
             }
-        });
-    }
-}
-  }catch(e){
-
-            log.error("error message", e.message)
-  }
 
 
-           if (locationId == 0 || locationId == null || locationId == '' || locationId == 9 || locationId == 15 || locationId == 'undefined') {
-                if (locationName == 'Flemington L41' || locationId == 9  ) {
+            if (locationId == 0 || locationId == null || locationId == '' || locationId == 9 || locationId == 15 || locationId == 'undefined') {
+                if (locationName == 'Flemington L41' || locationId == 9) {
                     locationId = 9;
                     bulkStageBin = 4859;
                 }
@@ -428,15 +428,15 @@ adjustmentRecord.setValue({
 
             var itemData = data.itemData || [];
             var pickerName = data.userName || data.username || "";
-         
+
 
             // Step 1: Get current quantities from bin
             var existingQuantitiesMap = binSearch(binId);
 
             log.debug("existingQuantitiesMap", JSON.stringify(existingQuantitiesMap));
-            
+
             var existingBulkBinQuantitiesMap = binSearch(bulkStageBin);
-          
+
             log.debug("existingBulkBinQuantitiesMap", JSON.stringify(existingBulkBinQuantitiesMap));
 
             // Step 2: Build adjustments
@@ -460,25 +460,25 @@ adjustmentRecord.setValue({
                 var currentBinQty = Number(existingQuantitiesMap[itemId]) || 0; //0
                 // log.debug("currentQty", currentBinQty);
 
-               var bulkBinQTy = Number(bulkBinItemQtymap[itemId]?.on_hand || 0); //15
+                var bulkBinQTy = Number(bulkBinItemQtymap[itemId]?.on_hand || 0); //15
 
-               var totalQty = Number(currentBinQty) + bulkBinQTy; //35
-         
-               var exstBulkBinQty =  Number(existingBulkBinQuantitiesMap[itemId]) || 0;
-              
-           // var totalQty
-           //    if (bulkBinQTy > exstBulkBinQty ) {
-           //      totalQty = Number(currentBinQty) + exstBulkBinQty;
-           //    }else {
-           //      totalQty = Number(currentBinQty) + bulkBinQTy; //35
-           //    }
-              
-        // var totalQty = Number(currentBinQty) + bulkBinQTy; //35
+                var totalQty = Number(currentBinQty) + bulkBinQTy; //35
+
+                var exstBulkBinQty = Number(existingBulkBinQuantitiesMap[itemId]) || 0;
+
+                // var totalQty
+                //    if (bulkBinQTy > exstBulkBinQty ) {
+                //      totalQty = Number(currentBinQty) + exstBulkBinQty;
+                //    }else {
+                //      totalQty = Number(currentBinQty) + bulkBinQTy; //35
+                //    }
+
+                // var totalQty = Number(currentBinQty) + bulkBinQTy; //35
                 // log.debug("totalQty", totalQty);
 
                 var adjustmentQty = totalQty - countedQty; //35-50=-15
 
-          log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + currentBinQty + ",bulkBinQTy=" + bulkBinQTy + ",totalQty=" + totalQty + ",diff=" + adjustmentQty);
+                log.debug("quanitylog", "countedQty=" + countedQty + ",currentBinQty=" + currentBinQty + ",bulkBinQTy=" + bulkBinQTy + ",totalQty=" + totalQty + ",diff=" + adjustmentQty);
 
                 // differnce is less than 0 then 0 and greater than currentQty then adjsut the bulkStageQty
                 if (adjustmentQty <= currentBinQty) {
@@ -496,7 +496,7 @@ adjustmentRecord.setValue({
                 else {
 
                     // Split adjustment across regular + bulkStageBin
-                   // log.debug("Split adjustment across regular + bulkStageBin : ", adjustmentQty);
+                    // log.debug("Split adjustment across regular + bulkStageBin : ", adjustmentQty);
 
                     var bulkBinAdjustQty = adjustmentQty - currentBinQty;//25-20=5
 
@@ -513,14 +513,14 @@ adjustmentRecord.setValue({
 
                     if (Number(bulkBinAdjustQty) != 0) {
                         if (Number(existingBulkBinQuantitiesMap[itemId]) >= Number(bulkBinAdjustQty)) {
-                      
-                          adjustmentsToMake.push({
+
+                            adjustmentsToMake.push({
                                 itemId: itemId,
                                 quantity: -1 * Number(bulkBinAdjustQty),
                                 locationId: locationId,
                                 binId: bulkStageBin,
                             });
-                          
+
                         } else {
                             adjustmentsToMake.push({
                                 itemId: itemId,
@@ -534,7 +534,7 @@ adjustmentRecord.setValue({
 
             });
 
-            log.error("item data", JSON.stringify(adjustmentsToMake));
+            // log.error("item data", JSON.stringify(adjustmentsToMake));
 
             // Step 3: Add adjustments for items not in input but existing in bin
 
@@ -554,7 +554,7 @@ adjustmentRecord.setValue({
                             binId: binId,
                         });
                     }
-                   var bulkStageAdjQtyNoBin = Number(bulkBinItemQtymap[itemId]?.on_hand || 0);
+                    var bulkStageAdjQtyNoBin = Number(bulkBinItemQtymap[itemId]?.on_hand || 0);
                     //	var dif = currentQty -  parseFloat(entry.quantity)
                     if (Number(bulkStageAdjQtyNoBin) !== 0) {
                         adjustmentsToMake.push({
@@ -569,26 +569,26 @@ adjustmentRecord.setValue({
 
             // Step 3: Create inventory adjustment if needed
             if (adjustmentsToMake.length === 0) {
-      try{
+                try {
 
-        var response = getBinInventoryDetail(binId);
-
- 
-            itemDetails = response.data[binId].itemDetails || " ";
+                    var response = getBinInventoryDetail(binId);
 
 
-        } catch(e){
+                    itemDetails = response.data[binId].itemDetails || " ";
 
-          log.error("Response Error",e.message);
 
-        }
+                } catch (e) {
+
+                    log.error("Response Error", e.message);
+
+                }
                 record.submitFields({
                     type: 'customrecord_wms_ai_api_custom_rec',
                     id: customRecId, // Make sure this is the internal ID of the existing custom record
                     values: {
                         custrecordwms_ai_api_custrec_error: 'No adjustment needed. Quantities match.',
                         custrecord_wms_ai_api_custrec_status: 2,
-                      custrecord_wms_ai_api_custrec_processing : false
+                        custrecord_wms_ai_api_custrec_processing: false
                     }
                 });
 
@@ -614,139 +614,139 @@ adjustmentRecord.setValue({
 
 
             adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-           // adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName+ " via Portal - "+data.portalId|| '' });
+            // adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName+ " via Portal - "+data.portalId|| '' });
 
-          var finalPickerName = '';
+            var finalPickerName = '';
 
-if (pickerName || data.portalId) {
-    finalPickerName = (pickerName || '') +
-        (data.portalId ? ' via Portal-' + data.portalId : '');
-}
+            if (pickerName || data.portalId) {
+                finalPickerName = (pickerName || '') +
+                    (data.portalId ? ' via Portal-' + data.portalId : '');
+            }
 
-adjustmentRecord.setValue({
-    fieldId: 'custbody_wms_ai_pickername',
-    value: finalPickerName
-});
-
-          adjustmentsToMake.forEach(function (adjustment) {
-              try {
-
-                adjustmentRecord.setValue({ fieldId: 'adjlocation', value: adjustment.locationId });
-
-
-                adjustmentRecord.selectNewLine({ sublistId: 'inventory' });
-
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'item',
-                    value: adjustment.itemId
-                });
-
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'location',
-                    value: adjustment.locationId
-                });
-
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'adjustqtyby',
-                    value: adjustment.quantity
-                });
-
-                var inventoryDetail = adjustmentRecord.getCurrentSublistSubrecord({
-                    sublistId: 'inventory',
-                    fieldId: 'inventorydetail'
-                });
-
-                inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-
-                inventoryDetail.setCurrentSublistValue({
-                    sublistId: 'inventoryassignment',
-                    fieldId: 'binnumber',
-                    value: parseInt(adjustment.binId, 10)
-                });
-
-                inventoryDetail.setCurrentSublistValue({
-                    sublistId: 'inventoryassignment',
-                    fieldId: 'quantity',
-                    value: adjustment.quantity
-                });
-
-                inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
-
-                adjustmentRecord.commitLine({ sublistId: 'inventory' });
-
-                //  adjustmentRecord.setValue({fieldId: 'account', value: account });
-
-                 } catch (itemErr) {
-      log.error('Error processing item', itemErr.message);
-
-          results.push({
-            itemId: adjustment,
-            success: false,
-            message: itemErr.message
-          });
-                  }
+            adjustmentRecord.setValue({
+                fieldId: 'custbody_wms_ai_pickername',
+                value: finalPickerName
             });
-          
+
+            adjustmentsToMake.forEach(function (adjustment) {
+                try {
+
+                    adjustmentRecord.setValue({ fieldId: 'adjlocation', value: adjustment.locationId });
+
+
+                    adjustmentRecord.selectNewLine({ sublistId: 'inventory' });
+
+                    adjustmentRecord.setCurrentSublistValue({
+                        sublistId: 'inventory',
+                        fieldId: 'item',
+                        value: adjustment.itemId
+                    });
+
+                    adjustmentRecord.setCurrentSublistValue({
+                        sublistId: 'inventory',
+                        fieldId: 'location',
+                        value: adjustment.locationId
+                    });
+
+                    adjustmentRecord.setCurrentSublistValue({
+                        sublistId: 'inventory',
+                        fieldId: 'adjustqtyby',
+                        value: adjustment.quantity
+                    });
+
+                    var inventoryDetail = adjustmentRecord.getCurrentSublistSubrecord({
+                        sublistId: 'inventory',
+                        fieldId: 'inventorydetail'
+                    });
+
+                    inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
+
+                    inventoryDetail.setCurrentSublistValue({
+                        sublistId: 'inventoryassignment',
+                        fieldId: 'binnumber',
+                        value: parseInt(adjustment.binId, 10)
+                    });
+
+                    inventoryDetail.setCurrentSublistValue({
+                        sublistId: 'inventoryassignment',
+                        fieldId: 'quantity',
+                        value: adjustment.quantity
+                    });
+
+                    inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
+
+                    adjustmentRecord.commitLine({ sublistId: 'inventory' });
+
+                    //  adjustmentRecord.setValue({fieldId: 'account', value: account });
+
+                } catch (itemErr) {
+                    log.error('Error processing item', itemErr.message);
+
+                    results.push({
+                        itemId: adjustment,
+                        success: false,
+                        message: itemErr.message
+                    });
+                }
+            });
+
             //adjustmentRecord.setValue({fieldId: 'account', value: account });
-  const hasErrors = results.length > 0;
-      let invAdjId = null;
+            const hasErrors = results.length > 0;
+            let invAdjId = null;
 
-      if (!hasErrors) {
-        invAdjId = adjustmentRecord.save({ enableSourcing: true, ignoreMandatoryFields: true });
-        log.error("invAdjId:", invAdjId);
-        try{
-        var response = getBinInventoryDetail(binId);
-         
-            itemDetails = response.data[binId].itemDetails || " ";
+            if (!hasErrors) {
+                invAdjId = adjustmentRecord.save({ enableSourcing: true, ignoreMandatoryFields: true });
+                // log.error("invAdjId:", invAdjId);
+                try {
+                    var response = getBinInventoryDetail(binId);
 
-        } catch(e){
+                    itemDetails = response.data[binId].itemDetails || " ";
 
-          log.error("Response Error",e.message);
+                } catch (e) {
 
-        }
+                    log.error("Response Error", e.message);
 
-        if (customRecId) {
-          record.submitFields({
-            type: 'customrecord_wms_ai_api_custom_rec',
-            id: customRecId,
-            values: {
-              custrecordwms_ai_api_custrec_rel_trans: invAdjId,
-      custrecordwms_ai_api_custrec_error: "Inventory Adjustment Id created successfully\nID:"+invAdjId,
-    custrecord_wms_ai_api_custrec_status: 2,
-              custrecord_wms_ai_api_custrec_processing : false
-              
+                }
+
+                if (customRecId) {
+                    record.submitFields({
+                        type: 'customrecord_wms_ai_api_custom_rec',
+                        id: customRecId,
+                        values: {
+                            custrecordwms_ai_api_custrec_rel_trans: invAdjId,
+                            custrecordwms_ai_api_custrec_error: "Inventory Adjustment Id created successfully\nID:" + invAdjId,
+                            custrecord_wms_ai_api_custrec_status: 2,
+                            custrecord_wms_ai_api_custrec_processing: false
+
+                        }
+                    });
+                }
+
+                return {
+                    success: true,
+                    message: 'inventory AdjustmentId created successfully',
+                    inventoryAdjustmentId: invAdjId,
+                    itemDetails: itemDetails
+                };
+            } else {
+                if (customRecId) {
+                    record.submitFields({
+                        type: 'customrecord_wms_ai_api_custom_rec',
+                        id: customRecId,
+                        values: {
+                            custrecordwms_ai_api_custrec_error: JSON.stringify(results),
+                            custrecord_wms_ai_api_custrec_status: 3,
+                            custrecord_wms_ai_api_custrec_processing: false
+                        }
+                    });
+                }
+
+                return {
+                    success: false,
+                    message: results
+                };
+
             }
-          });
-        }
-
-        return {
-          success: true,
-          message: 'inventory AdjustmentId created successfully',
-          inventoryAdjustmentId: invAdjId,
-          itemDetails: itemDetails
-        };
-      } else {  
-        if (customRecId) {
-          record.submitFields({
-            type: 'customrecord_wms_ai_api_custom_rec',
-            id: customRecId,
-            values: {
-              custrecordwms_ai_api_custrec_error: JSON.stringify(results),
-              custrecord_wms_ai_api_custrec_status: 3,
-              custrecord_wms_ai_api_custrec_processing : false
-            }
-          });
-        }
-
-        return {
-          success: false,
-          message: results
-        };
-
-      }
 
         } catch (e) {
 
@@ -756,7 +756,7 @@ adjustmentRecord.setValue({
                 values: {
                     custrecordwms_ai_api_custrec_error: e.message,
                     custrecord_wms_ai_api_custrec_status: 3,
-                  custrecord_wms_ai_api_custrec_processing : false
+                    custrecord_wms_ai_api_custrec_processing: false
                 }
             });
 
@@ -771,73 +771,73 @@ adjustmentRecord.setValue({
 
 
 
-  
-  function binTransfer(data, customRecId) {
+
+    function binTransfer(data, customRecId) {
         var customRecId = customRecId;
 
-        log.error("binTransfer - Started", JSON.stringify(data));
+        // log.error("binTransfer - Started", JSON.stringify(data));
         var results = [];
 
         try {
             var binId = data.binId;
             var locationId = data.location || '';
-            log.error("binId", binId);
+            // log.error("binId", binId);
             var locationName = data.locationName;
             var bulkStageBin = '';
             var toBin = data.toBin;
             var itemData = data.itemData || [];
-            var pickerName = data.userName ||data.username || "";
+            var pickerName = data.userName || data.username || "";
             var adjId = '';
 
-          
-try{
-          if (toBin) {
-    var lookup = search.lookupFields({
-        type:'bin',
-        id: toBin,
-        columns: ['isinactive']
-    });
 
-    var isInactive = lookup.isinactive; // boolean true/false
+            try {
+                if (toBin) {
+                    var lookup = search.lookupFields({
+                        type: 'bin',
+                        id: toBin,
+                        columns: ['isinactive']
+                    });
 
-    // If bin is inactive, make it active
-    if (isInactive ===true) {
-        record.submitFields({
-            type: 'bin',
-            id: toBin,
-            values: {
-                isinactive: false
+                    var isInactive = lookup.isinactive; // boolean true/false
+
+                    // If bin is inactive, make it active
+                    if (isInactive === true) {
+                        record.submitFields({
+                            type: 'bin',
+                            id: toBin,
+                            values: {
+                                isinactive: false
+                            }
+                        });
+                    }
+                }
+
+                if (binId) {
+                    var lookup = search.lookupFields({
+                        type: 'bin',
+                        id: binId,
+                        columns: ['isinactive']
+                    });
+
+                    var isInactive = lookup.isinactive; // boolean true/false
+
+                    // If bin is inactive, make it active
+                    if (isInactive === true) {
+                        record.submitFields({
+                            type: 'bin',
+                            id: binId,
+                            values: {
+                                isinactive: false
+                            }
+                        });
+                    }
+                }
+            } catch (e) {
+                log.error("Error in bin lookup or update", e.message);
             }
-        });
-    }
-}
-
-          if (binId) {
-    var lookup = search.lookupFields({
-        type: 'bin',
-        id: binId,
-        columns: ['isinactive']
-    });
-
-    var isInactive = lookup.isinactive; // boolean true/false
-
-    // If bin is inactive, make it active
-    if (isInactive === true) {
-        record.submitFields({
-            type: 'bin',
-            id: binId,
-            values: {
-                isinactive: false
-            }
-        });
-    }
-}
-  }catch(e){
-  log.error("error message", e.message)
-  }
 
 
-          
+
 
             if (!locationId || locationId == 0 || locationId == 'undefined' || locationId == 9 || locationId == 15) {
                 if (locationName === 'Flemington L41' || locationName === 9) {
@@ -852,196 +852,196 @@ try{
             var existingQuantitiesMap = binSearch(binId);
 
 
-          //  log.error("existingQuantitiesMap", JSON.stringify(existingQuantitiesMap));
+            //  // log.error("existingQuantitiesMap", JSON.stringify(existingQuantitiesMap));
             /////////////
             var existingBulkBinQuantitiesMap = binSearch(bulkStageBin);
-          
-          //  log.error("existingBulkBinQuantitiesMap", JSON.stringify(existingBulkBinQuantitiesMap));
 
-   
+            //  // log.error("existingBulkBinQuantitiesMap", JSON.stringify(existingBulkBinQuantitiesMap));
+
+
             var bulkBinItemQtymap = fetchBulkStageBinTracking(binId);
 
-          //  log.error("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
+            //  // log.error("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
 
 
-          	var adjustmentsToMake  = [];
-			
-			 itemData.forEach((item) => {
-               
-			    var itemId = item.itemId.toString()
+            var adjustmentsToMake = [];
+
+            itemData.forEach((item) => {
+
+                var itemId = item.itemId.toString()
                 var transferQty = Number(item.quantity) || 0; //1
-                log.error("transferQty", transferQty); //1
-				
-               // log.error("existingQuantitiesMap[itemId]", existingQuantitiesMap[itemId]);
+                // log.error("transferQty", transferQty); //1
+
+                // // log.error("existingQuantitiesMap[itemId]", existingQuantitiesMap[itemId]);
 
                 var currentBinQty = Number(existingQuantitiesMap[itemId]) || 0; //
-              //  log.error("currentQty", currentBinQty); //0
+                //  // log.error("currentQty", currentBinQty); //0
 
                 var bulkBinQTy = Number(bulkBinItemQtymap[itemId] || 0); //15
-				//log.error("bulkBinQty", bulkBinQTy); //0
-				
+                //// log.error("bulkBinQty", bulkBinQTy); //0
+
                 var estbulkBinQty = Number(existingBulkBinQuantitiesMap[itemId] || 0);
-              //  log.error("estbulkBinQty", estbulkBinQty); //0
-				
+                //  // log.error("estbulkBinQty", estbulkBinQty); //0
+
                 var totalQty = Number(currentBinQty) + bulkBinQTy; //35
-              //  log.error("totalQty", totalQty); 
-				
-				if (item.quantity == 0 || transferQty <= currentBinQty || totalQty >= transferQty) {
-                       // log.error("item.quantity", item.quantity);
+                //  // log.error("totalQty", totalQty); 
+
+                if (item.quantity == 0 || transferQty <= currentBinQty || totalQty >= transferQty) {
+                    // // log.error("item.quantity", item.quantity);
+                    return true;
+                }
+                else {
+
+                    totalQty = estbulkBinQty + currentBinQty;
+                    //   // log.error("totalQty2", totalQty);
+
+
+                    if (transferQty <= totalQty) {
                         return true;
                     }
-			     else {
-                       
-                            totalQty = estbulkBinQty + currentBinQty;
-                         //   log.error("totalQty2", totalQty);
-                        
-						
-                        if (transferQty <= totalQty) {
-                         return true;
-                        }
-						else {
-							
-							var adjustmentQty =  transferQty - totalQty; 
-							
-							adjustmentsToMake.push({
+                    else {
+
+                        var adjustmentQty = transferQty - totalQty;
+
+                        adjustmentsToMake.push({
                             itemId: itemId,
                             quantity: adjustmentQty,
                             locationId: locationId,
                             binId: bulkStageBin,
                         });
-						
-						}
-					
-			 }
-			
-             });
 
-         //    log.error("adjustment to make",JSON.stringify(adjustmentsToMake));
-          
-          
-			if (adjustmentsToMake.length > 0) {
-			 
-			  var adjustmentRecord = record.create({
-                type: record.Type.INVENTORY_ADJUSTMENT,
-                isDynamic: true
+                    }
+
+                }
+
             });
 
-            var account = parseInt(464, 10); // Use your working account
-            var subsidiaryId = 1;            // Use your hardcoded subsidiary
-
-            adjustmentRecord.setValue({ fieldId: 'subsidiary', value: subsidiaryId });
-            adjustmentRecord.setValue({ fieldId: 'account', value: account });
-            adjustmentRecord.setValue({ fieldId: 'memo', value: data.binName });
-			adjustmentRecord.setValue({ fieldId: 'adjlocation', value: locationId });
+            //    // log.error("adjustment to make",JSON.stringify(adjustmentsToMake));
 
 
-            adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-           // adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: value: pickerName+ " via Portal-"+data.portalId|| '' });
+            if (adjustmentsToMake.length > 0) {
 
-              var finalPickerName = '';
-
-if (pickerName || data.portalId) {
-    finalPickerName = (pickerName || '') +
-        (data.portalId ? ' via Portal-' + data.portalId : '');
-}
-
-adjustmentRecord.setValue({
-    fieldId: 'custbody_wms_ai_pickername',
-    value: finalPickerName
-});
-
-			 
-			 
-			
-           adjustmentsToMake.forEach(function (adjustment) {
-              try {
-
-                adjustmentRecord.selectNewLine({ sublistId: 'inventory' });
-
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'item',
-                    value: adjustment.itemId
+                var adjustmentRecord = record.create({
+                    type: record.Type.INVENTORY_ADJUSTMENT,
+                    isDynamic: true
                 });
 
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'location',
-                    value: adjustment.locationId
+                var account = parseInt(464, 10); // Use your working account
+                var subsidiaryId = 1;            // Use your hardcoded subsidiary
+
+                adjustmentRecord.setValue({ fieldId: 'subsidiary', value: subsidiaryId });
+                adjustmentRecord.setValue({ fieldId: 'account', value: account });
+                adjustmentRecord.setValue({ fieldId: 'memo', value: data.binName });
+                adjustmentRecord.setValue({ fieldId: 'adjlocation', value: locationId });
+
+
+                adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
+                // adjustmentRecord.setValue({ fieldId: 'custbody_wms_ai_pickername', value: value: pickerName+ " via Portal-"+data.portalId|| '' });
+
+                var finalPickerName = '';
+
+                if (pickerName || data.portalId) {
+                    finalPickerName = (pickerName || '') +
+                        (data.portalId ? ' via Portal-' + data.portalId : '');
+                }
+
+                adjustmentRecord.setValue({
+                    fieldId: 'custbody_wms_ai_pickername',
+                    value: finalPickerName
                 });
 
-                adjustmentRecord.setCurrentSublistValue({
-                    sublistId: 'inventory',
-                    fieldId: 'adjustqtyby',
-                    value: adjustment.quantity
+
+
+
+                adjustmentsToMake.forEach(function (adjustment) {
+                    try {
+
+                        adjustmentRecord.selectNewLine({ sublistId: 'inventory' });
+
+                        adjustmentRecord.setCurrentSublistValue({
+                            sublistId: 'inventory',
+                            fieldId: 'item',
+                            value: adjustment.itemId
+                        });
+
+                        adjustmentRecord.setCurrentSublistValue({
+                            sublistId: 'inventory',
+                            fieldId: 'location',
+                            value: adjustment.locationId
+                        });
+
+                        adjustmentRecord.setCurrentSublistValue({
+                            sublistId: 'inventory',
+                            fieldId: 'adjustqtyby',
+                            value: adjustment.quantity
+                        });
+
+                        var inventoryDetail = adjustmentRecord.getCurrentSublistSubrecord({
+                            sublistId: 'inventory',
+                            fieldId: 'inventorydetail'
+                        });
+
+                        inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
+
+                        inventoryDetail.setCurrentSublistValue({
+                            sublistId: 'inventoryassignment',
+                            fieldId: 'binnumber',
+                            value: parseInt(adjustment.binId, 10)
+                        });
+
+                        inventoryDetail.setCurrentSublistValue({
+                            sublistId: 'inventoryassignment',
+                            fieldId: 'quantity',
+                            value: adjustment.quantity
+                        });
+
+                        inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
+
+                        adjustmentRecord.commitLine({ sublistId: 'inventory' });
+
+                    }
+                    catch (itemErr) {
+                        // log.error('Error processing item', itemErr.message);
+
+                        results.push({
+                            itemId: adjustment,
+                            success: false,
+                            message: itemErr.message
+                        });
+                    }
                 });
+                //adjustmentRecord.setValue({fieldId: 'account', value: account });
 
-                var inventoryDetail = adjustmentRecord.getCurrentSublistSubrecord({
-                    sublistId: 'inventory',
-                    fieldId: 'inventorydetail'
-                });
+                const hasErrors = results.length > 0;
+                adjId = null;
 
-                inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-
-                inventoryDetail.setCurrentSublistValue({
-                    sublistId: 'inventoryassignment',
-                    fieldId: 'binnumber',
-                    value: parseInt(adjustment.binId, 10)
-                });
-
-                inventoryDetail.setCurrentSublistValue({
-                    sublistId: 'inventoryassignment',
-                    fieldId: 'quantity',
-                    value: adjustment.quantity
-                });
-
-                inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
-
-                adjustmentRecord.commitLine({ sublistId: 'inventory' });
-
-                 } 
-              catch (itemErr) {
-          log.error('Error processing item', itemErr.message);
-
-          results.push({
-            itemId: adjustment,
-            success: false,
-            message: itemErr.message
-          });
-                  }
-            });
-            //adjustmentRecord.setValue({fieldId: 'account', value: account });
-          
-  const hasErrors = results.length > 0;
-    adjId = null;
-
-      if (!hasErrors) {
-        try{
-     adjId = adjustmentRecord.save({ enableSourcing: true, ignoreMandatoryFields: true });
-      //  log.error("invAdjId:", adjId);
-        }catch(e) {
-           log.error("error message", e.message);
-          }
-	  }
-				
-			
-		}		
-
-     		  existingQuantitiesMap = binSearch(binId);
+                if (!hasErrors) {
+                    try {
+                        adjId = adjustmentRecord.save({ enableSourcing: true, ignoreMandatoryFields: true });
+                        //  // log.error("invAdjId:", adjId);
+                    } catch (e) {
+                        log.error("Error saving inventory adjustment", e);
+                    }
+                }
 
 
-          //  log.error("existingQuantitiesMap", JSON.stringify(existingQuantitiesMap));
+            }
+
+            existingQuantitiesMap = binSearch(binId);
+
+
+            //  // log.error("existingQuantitiesMap", JSON.stringify(existingQuantitiesMap));
             /////////////
-             existingBulkBinQuantitiesMap = binSearch(bulkStageBin);
-          
-          //  log.error("existingBulkBinQuantitiesMap", JSON.stringify(existingBulkBinQuantitiesMap))
+            existingBulkBinQuantitiesMap = binSearch(bulkStageBin);
 
-   
-             bulkBinItemQtymap = fetchBulkStageBinTracking(binId);
+            //  // log.error("existingBulkBinQuantitiesMap", JSON.stringify(existingBulkBinQuantitiesMap))
 
-           // log.error("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
 
-          
+            bulkBinItemQtymap = fetchBulkStageBinTracking(binId);
+
+            // // log.error("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
+
+
             // Create the Bin Transfer record
             const binTransferRec = record.create({
                 type: record.Type.BIN_TRANSFER,
@@ -1065,56 +1065,57 @@ adjustmentRecord.setValue({
                 value: true
             });
 
-          
+
             binTransferRec.setValue({
                 fieldId: 'custbody_wms_ai_pickername',
-               value: pickerName || '' });
+                value: pickerName || ''
+            });
 
 
             var locationID = binTransferRec.getValue('location');
-            log.error("locationID", locationID);
+            // log.error("locationID", locationID);
 
             var lineCount = 0;
-			
+
 
             itemData.forEach((item) => {
-  ////////////////////////////////////////////////////////////////////////
-                
+                ////////////////////////////////////////////////////////////////////////
+
                 var itemId = item.itemId.toString()
-              var transferQty = Number(item.quantity) || 0; //1
-            // log.error("transferQty", transferQty); //1
-				
-             //   log.error("existingQuantitiesMap[itemId]", existingQuantitiesMap[itemId]);
+                var transferQty = Number(item.quantity) || 0; //1
+                // // log.error("transferQty", transferQty); //1
+
+                //   // log.error("existingQuantitiesMap[itemId]", existingQuantitiesMap[itemId]);
 
                 var currentBinQty = Number(existingQuantitiesMap[itemId]) || 0; //
-              //  log.error("currentQty", currentBinQty); //0
+                //  // log.error("currentQty", currentBinQty); //0
 
                 var bulkBinQTy = Number(bulkBinItemQtymap[itemId] || 0); //15
-			//	log.error("bulkBinQty", bulkBinQTy); //0
-				
-                var estbulkBinQty = Number(existingBulkBinQuantitiesMap[itemId] || 0);
-              //  log.error("estbulkBinQty", estbulkBinQty); //0
-				
-                
-                var totalQty = Number(currentBinQty) + bulkBinQTy; //35
-               // log.error("totalQty", totalQty);
+                //	// log.error("bulkBinQty", bulkBinQTy); //0
 
-              log.error("Quantities Debug", {
-    transferQty: transferQty,
-    currentBinQty: Number(existingQuantitiesMap[itemId]) || 0,
-    bulkBinQty: Number(bulkBinItemQtymap[itemId] || 0),
-    estBulkBinQty: Number(existingBulkBinQuantitiesMap[itemId] || 0),
-    totalQty: (Number(existingQuantitiesMap[itemId]) || 0) + (Number(bulkBinItemQtymap[itemId] || 0))
-});
+                var estbulkBinQty = Number(existingBulkBinQuantitiesMap[itemId] || 0);
+                //  // log.error("estbulkBinQty", estbulkBinQty); //0
+
+
+                var totalQty = Number(currentBinQty) + bulkBinQTy; //35
+                // // log.error("totalQty", totalQty);
+
+                // log.error("Quantities Debug", {
+                //     transferQty: transferQty,
+                //     currentBinQty: Number(existingQuantitiesMap[itemId]) || 0,
+                //     bulkBinQty: Number(bulkBinItemQtymap[itemId] || 0),
+                //     estBulkBinQty: Number(existingBulkBinQuantitiesMap[itemId] || 0),
+                //     totalQty: (Number(existingQuantitiesMap[itemId]) || 0) + (Number(bulkBinItemQtymap[itemId] || 0))
+                // });
 
 
                 var adjBin;
                 var adjQty;
-				
-                try {				
+
+                try {
 
                     if (item.quantity == 0) {
-                        log.error("item.quantity", item.quantity);
+                        // log.error("item.quantity", item.quantity);
                         return;
                     }
 
@@ -1122,7 +1123,7 @@ adjustmentRecord.setValue({
                         sublistId: 'inventory'
                     });
 
-                   
+
                     binTransferRec.setCurrentSublistValue({
                         sublistId: 'inventory',
                         fieldId: 'item',
@@ -1134,80 +1135,80 @@ adjustmentRecord.setValue({
                         sublistId: 'inventory',
                         fieldId: 'item'
                     });
-                    log.error("itemId", itemId);
+                    // log.error("itemId", itemId);
 
                     binTransferRec.setCurrentSublistValue({
                         sublistId: 'inventory',
                         fieldId: 'quantity',
                         value: item.quantity
                     });
-					
+
                     var quantity = binTransferRec.getCurrentSublistValue({
                         sublistId: 'inventory',
                         fieldId: 'quantity'
                     });
-					
-                    log.error("quantity", quantity);
+
+                    // log.error("quantity", quantity);
                     const inventoryDetail = binTransferRec.getCurrentSublistSubrecord({
                         sublistId: 'inventory',
                         fieldId: 'inventorydetail'
                     });
-					
+
                     let invAsg = false;
-					
+
                     if (transferQty <= currentBinQty) {
 
                         adjBin = [binId];
                         adjQty = [item.quantity];
                         invAsg = inventoryAssignment(inventoryDetail, adjBin, adjQty, toBin, item);
-                        log.error("invAsg1", invAsg);	
-                    } 
-					else {
-						
+                        // log.error("invAsg1", invAsg);
+                    }
+                    else {
+
                         if (totalQty >= transferQty) {
                             totalQty = totalQty;
-                           // log.error("totalQty1", totalQty);
-                        } 
-						else {
-                            totalQty = estbulkBinQty + currentBinQty;
-                           // log.error("totalQty2", totalQty);
+                            // // log.error("totalQty1", totalQty);
                         }
-						
-                      //  log.error("totalQty3", totalQty);
-						
+                        else {
+                            totalQty = estbulkBinQty + currentBinQty;
+                            // // log.error("totalQty2", totalQty);
+                        }
+
+                        //  // log.error("totalQty3", totalQty);
+
                         if (transferQty <= totalQty) {
 
                             adjBin = [binId, bulkStageBin];
 
                             let secondQty = transferQty - currentBinQty;
                             if (secondQty < 0) {
-                                log.error("Negative quantity adjustment prevented", {
-                                    itemId: itemId,
-                                    currentBinQty,
-                                    transferQty
-                                });
+                                // log.error("Negative quantity adjustment prevented", {
+                                //     itemId: itemId,
+                                //     currentBinQty,
+                                //     transferQty
+                                // });
                                 secondQty = 0;
                             }
                             adjQty = [currentBinQty, secondQty];
                             //	adjQty = [currentBinQty, (transferQty - currentBinQty) ];
                             invAsg = inventoryAssignment(inventoryDetail, adjBin, adjQty, toBin, item);
-                            log.error("invAsg2", invAsg);
-							
+                            // log.error("invAsg2", invAsg);
+
                         }
-						
+
                     }
 
                     if (invAsg) {
                         binTransferRec.commitLine({
                             sublistId: 'inventory'
                         });
-                        log.error("Line committed", itemId);
+                        // log.error("Line committed", itemId);
                     } else {
                         throw new Error("Inventory assignment failed or missing.");
                     }
                     // Don't push success result
                 } catch (itemErr) {
-                    log.error('Error processing item', itemErr.message);
+                     log.error('Error processing item', itemErr.message);
                     results.push({
                         itemId: item,
                         success: false,
@@ -1222,16 +1223,16 @@ adjustmentRecord.setValue({
             lineCount = binTransferRec.getLineCount({
                 sublistId: 'inventory'
             });
-       //     log.error("lineCount", lineCount);
+            //     // log.error("lineCount", lineCount);
 
             if (!hasErrors && lineCount > 0) {
                 binTransferId = binTransferRec.save({
                     enableSourcing: true,
                     ignoreMandatoryFields: true
                 });
-                // log.error("binTransferId:", binTransferId);
+                // // log.error("binTransferId:", binTransferId);
 
-                // log.error("customRecId: 120", customRecId);
+                // // log.error("customRecId: 120", customRecId);
                 if (customRecId) {
                     record.submitFields({
                         type: 'customrecord_wms_ai_api_custom_rec',
@@ -1254,7 +1255,7 @@ adjustmentRecord.setValue({
                 };
             } else {
                 if (customRecId) {
-                   // log.error("results165", results);
+                    // // log.error("results165", results);
                     if (results.length > 0) {
 
                         record.submitFields({
@@ -1269,7 +1270,7 @@ adjustmentRecord.setValue({
                         });
 
                     } else {
-                        log.error("results180", results);
+                        // log.error("results180", results);
                         record.submitFields({
                             type: 'customrecord_wms_ai_api_custom_rec',
                             id: customRecId,
@@ -1291,7 +1292,7 @@ adjustmentRecord.setValue({
 
 
         } catch (e) {
-            log.error('Bin Transfer Failed (outer)', e.message);
+             log.error('Bin Transfer Failed (outer)', e.message);
 
             if (customRecId) {
                 record.submitFields({
@@ -1312,7 +1313,7 @@ adjustmentRecord.setValue({
         }
     }
 
-  
+
 
     function binSearch(binId) {
         try {
@@ -1358,11 +1359,11 @@ adjustmentRecord.setValue({
                 pageSize: 1000
             });
 
-            pagedResults.pageRanges.forEach(function(pageRange) {
+            pagedResults.pageRanges.forEach(function (pageRange) {
                 var page = pagedResults.fetch({
                     index: pageRange.index
                 });
-                page.data.forEach(function(result) {
+                page.data.forEach(function (result) {
                     var itemId = result.getValue({
                         name: 'internalid'
                     });
@@ -1379,16 +1380,16 @@ adjustmentRecord.setValue({
             return existingBulkBinQuantitiesMap;
 
         } catch (e) {
-            log.error("Error in binSearch", e.toString());
+             log.error("Error in binSearch", e.toString());
             return {};
         }
     }
 
     function fetchBulkStageBinTracking(binNumberId) {
 
-        try { 
-          var bulkStageBin;
-          var locationLookup = search.lookupFields({
+        try {
+            var bulkStageBin;
+            var locationLookup = search.lookupFields({
                 type: search.Type.BIN,
                 id: binNumberId,
                 columns: ['location']
@@ -1403,7 +1404,7 @@ adjustmentRecord.setValue({
                 bulkStageBin = 16692;
             }
 
-          //log.error("locationid",locationId);
+            //// log.error("locationid",locationId);
             var bulkBinItemQtymap = {};
             //searching BUlk Stage Bin Tracking Records
             var customrecord_bulk_stage_bin_trackingSearchObj = search.create({
@@ -1434,17 +1435,17 @@ adjustmentRecord.setValue({
                         summary: "SUM",
                         label: "Quantity Fulfill"
                     }),
-                   search.createColumn({ name: "upccode", join: "CUSTRECORD_ITEM_NAME", summary: "GROUP", label: "UPC Code" })
+                    search.createColumn({ name: "upccode", join: "CUSTRECORD_ITEM_NAME", summary: "GROUP", label: "UPC Code" })
 
                 ]
             });
 
             var searchResultCount = customrecord_bulk_stage_bin_trackingSearchObj.runPaged().count;
-           // log.error("customrecord_bulk_stage_bin_trackingSearchObj result count", searchResultCount);
+            // // log.error("customrecord_bulk_stage_bin_trackingSearchObj result count", searchResultCount);
 
             var existingBulkBinQuantitiesMap = binSearch(bulkStageBin);
 
-            customrecord_bulk_stage_bin_trackingSearchObj.run().each(function(result) {
+            customrecord_bulk_stage_bin_trackingSearchObj.run().each(function (result) {
 
                 var itemId = result.getValue({
                     name: "custrecord_item_name",
@@ -1460,9 +1461,9 @@ adjustmentRecord.setValue({
                 })) || 0;
 
                 // Skip if item is not present in existingBulkBinQuantitiesMap or value is 0
-                if ( existingBulkBinQuantitiesMap[itemId] < quantity ) {
-                    log.error("existingBulkBinQuantitiesMap[itemId]", existingBulkBinQuantitiesMap[itemId]);
-                  quantity = existingBulkBinQuantitiesMap[itemId];                   // return true;
+                if (existingBulkBinQuantitiesMap[itemId] < quantity) {
+                    // log.error("existingBulkBinQuantitiesMap[itemId]", existingBulkBinQuantitiesMap[itemId]);
+                    quantity = existingBulkBinQuantitiesMap[itemId];                   // return true;
                 }
                 //   var quantity = result.getValue({ name: "custrecord_quantity_remaining", summary: "SUM", label: "Quantity Fulfill" });
                 bulkBinItemQtymap[itemId] = {
@@ -1472,7 +1473,7 @@ adjustmentRecord.setValue({
                         summary: "GROUP"
                     }),
                     "location": "",
-                    "item_upc" : result.getValue({ name: "upccode", join: "CUSTRECORD_ITEM_NAME", summary: "GROUP" }),
+                    "item_upc": result.getValue({ name: "upccode", join: "CUSTRECORD_ITEM_NAME", summary: "GROUP" }),
                     "inventory_number": "",
                     "status": "",
                     "on_hand": Number(quantity).toString(),
@@ -1488,7 +1489,7 @@ adjustmentRecord.setValue({
             });
 
             /*	bulkBinItemQtymap =		{
-            	            "60104":{
+                            "60104":{
                                 "item": "MCR100C-28",
                                 "bin_number": "L4102037802",
                                 "location": "Flemington L41",
@@ -1499,8 +1500,8 @@ adjustmentRecord.setValue({
                                 "item_internal_id": "60104",
                                 "bin_internal_id": "4084"
                             },
-            				
-            				"60104":{
+                        	
+                            "60104":{
                                 "item": "RES101A-28",
                                 "bin_number": "L4102037802",
                                 "location": "Flemington L41",
@@ -1512,7 +1513,7 @@ adjustmentRecord.setValue({
                                 "bin_internal_id": "4084"
                             }
             }*/
-        //    log.error("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
+            //    // log.error("bulkBinItemQtymap", JSON.stringify(bulkBinItemQtymap));
 
             return bulkBinItemQtymap;
         } catch (e) {
@@ -1527,11 +1528,11 @@ adjustmentRecord.setValue({
                 if (!Array.isArray(adjBin)) adjBin = [adjBin];
                 if (!Array.isArray(adjQty)) adjQty = [adjQty];
                 var binId = adjBin[i];
-                log.error(" inv binId", binId); // get bin number from array
+                // log.error(" inv binId", binId); // get bin number from array
                 var quantity = adjQty[i];
-                log.error("quantity", quantity);
+                // log.error("quantity", quantity);
                 if (quantity == 0) {
-                    log.error("quantity is zero");
+                    // log.error("quantity is zero");
                     continue;
                 }
 
@@ -1573,27 +1574,27 @@ adjustmentRecord.setValue({
         }
     }
 
-     function getBinInventoryDetail(params) {
+    function getBinInventoryDetail(params) {
         try {
             //  var scriptStartTime = new Date().getTime();
 
             var scriptObj = runtime.getCurrentScript();
-            
-             log.error("request params ", JSON.stringify(params));
+
+            // log.error("request params ", JSON.stringify(params));
 
             var binSearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_bin_based_inv_detail' });
-           // log.error('binSearchId', binSearchId);
+            // // log.error('binSearchId', binSearchId);
             var binId = params.binId || params;
 
             var bulkBinItemQtymap = fetchBulkStageBinTracking(binId);
 
-           // log.error("bulkBinItemQtymap ", JSON.stringify(bulkBinItemQtymap));
-            
+            // // log.error("bulkBinItemQtymap ", JSON.stringify(bulkBinItemQtymap));
+
 
             var binSearch = search.load({
                 id: binSearchId,
                 type: 'item'
-            });        
+            });
 
             var filters = binSearch.filters || [];
 
@@ -1628,21 +1629,21 @@ adjustmentRecord.setValue({
             var binsAvailable = new Array();
             binSearch.run().each(function (result) {
 
-              var binInternalId = result.getValue({
+                var binInternalId = result.getValue({
                     name: 'binnumber',
                     join: 'binOnHand'
                 });
-                
+
                 binsAvailable.push(binInternalId);
                 //  log.audit(" binNumber ", binInternalId);
                 var data = {}
                 //   var columnName = (column.label || column.name);
-              
+
                 var itemId = result.getValue('internalid');
-                
-			    if (itemId && !inputItemIds.includes(itemId)) {
-                 inputItemIds.push(itemId.toString());
-                 }
+
+                if (itemId && !inputItemIds.includes(itemId)) {
+                    inputItemIds.push(itemId.toString());
+                }
 
                 // Initialize item group
                 if (!recordData[binInternalId]) {
@@ -1652,61 +1653,61 @@ adjustmentRecord.setValue({
                     };
                 }
 
-    result.columns.forEach(function (column) {
-    var columnName = toSnakeCase(column.label || column.name);
+                result.columns.forEach(function (column) {
+                    var columnName = toSnakeCase(column.label || column.name);
 
-    var binInternalId = result.getValue({ name: 'binnumber', join: 'binOnHand' });
-    if (binInternalId) {
-        data['bin_internal_id'] = binInternalId.toString();
-    }
-       if (columnName == 'location') {
-        data['loc_internalid'] = result.getValue(column) || " ";
-        data['location'] = result.getText(column) || " ";
-     } 
-      
-    else if (columnName === 'on_hand') {
-        var itemId = result.getValue({ name: 'internalid' });
-        var binOnHandQty = result.getValue(column); // from binOnHand join
-        var extraQty = bulkBinItemQtymap[itemId]?.on_hand || 0;
-        var finalQty = Number(binOnHandQty) + Number(extraQty);
-        data[columnName] = finalQty.toString();
-    } else if (columnName === 'available') {
-        var itemId = result.getValue({ name: 'internalid' });
-        var onHandQty = result.getValue({ name: 'quantityonhand', join: 'binOnHand' });
-        var extraQty = bulkBinItemQtymap[itemId]?.on_hand || 0;
-        var finalQty = Number(onHandQty) + Number(extraQty);
-        data[columnName] = finalQty.toString();
-    } else {
-        var value = result.getText(column) || result.getValue(column);
-       data['status'] = " ";
-        data[columnName] = value != null ? value.toString() : '';
-    }
-});
+                    var binInternalId = result.getValue({ name: 'binnumber', join: 'binOnHand' });
+                    if (binInternalId) {
+                        data['bin_internal_id'] = binInternalId.toString();
+                    }
+                    if (columnName == 'location') {
+                        data['loc_internalid'] = result.getValue(column) || " ";
+                        data['location'] = result.getText(column) || " ";
+                    }
+
+                    else if (columnName === 'on_hand') {
+                        var itemId = result.getValue({ name: 'internalid' });
+                        var binOnHandQty = result.getValue(column); // from binOnHand join
+                        var extraQty = bulkBinItemQtymap[itemId]?.on_hand || 0;
+                        var finalQty = Number(binOnHandQty) + Number(extraQty);
+                        data[columnName] = finalQty.toString();
+                    } else if (columnName === 'available') {
+                        var itemId = result.getValue({ name: 'internalid' });
+                        var onHandQty = result.getValue({ name: 'quantityonhand', join: 'binOnHand' });
+                        var extraQty = bulkBinItemQtymap[itemId]?.on_hand || 0;
+                        var finalQty = Number(onHandQty) + Number(extraQty);
+                        data[columnName] = finalQty.toString();
+                    } else {
+                        var value = result.getText(column) || result.getValue(column);
+                        data['status'] = " ";
+                        data[columnName] = value != null ? value.toString() : '';
+                    }
+                });
                 recordData[binInternalId].itemDetails.push(data);
 
                 return true
             });
 
-                try {
-                    if (Object.keys(bulkBinItemQtymap).length != 0) {
-                        Object.keys(bulkBinItemQtymap).forEach(function (itemId) {
-                            if (!inputItemIds.includes(itemId)) {
-                                recordData[binId].itemDetails.push(bulkBinItemQtymap[itemId])
-                            }
-                        });
-                    }
-                } catch (e) {
-                    log.error("Error in getBinInventoryDetail", e);
+            try {
+                if (Object.keys(bulkBinItemQtymap).length != 0) {
+                    Object.keys(bulkBinItemQtymap).forEach(function (itemId) {
+                        if (!inputItemIds.includes(itemId)) {
+                            recordData[binId].itemDetails.push(bulkBinItemQtymap[itemId])
+                        }
+                    });
                 }
+            } catch (e) {
+                log.error("Error in getBinInventoryDetail", e);
+            }
 
-                // If recordData is empty, return the specified structure
-                if (Object.keys(recordData).length == 0) {
-                    recordData[binId] = {
-                        binId: binId.toString(),
-                        itemDetails: []
-                    };
-                }
-            log.emergency("recordData", JSON.stringify(recordData));
+            // If recordData is empty, return the specified structure
+            if (Object.keys(recordData).length == 0) {
+                recordData[binId] = {
+                    binId: binId.toString(),
+                    itemDetails: []
+                };
+            }
+            // log.emergency("recordData", JSON.stringify(recordData));
 
             return {
                 status: 200,
@@ -1725,14 +1726,14 @@ adjustmentRecord.setValue({
     }
 
 
-     function getBins(context, pageSize, startIndex) {
+    function getBins(context, pageSize, startIndex) {
         try {
             var ScriptStartTime = new Date().getTime();
-           // log.error('Script Started', 'Start Time: ' + ScriptStartTime / 1000 + ' seconds');
+            // // log.error('Script Started', 'Start Time: ' + ScriptStartTime / 1000 + ' seconds');
 
             var scriptObj = runtime.getCurrentScript();
             var BinSearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_bins' });
-    
+
             var Data = {};
 
             var BinSearch = search.load({ id: BinSearchId });
@@ -1757,7 +1758,7 @@ adjustmentRecord.setValue({
             });
 
             var ScriptEndTime = new Date().getTime();
-           // log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
+            // log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
 
 
 
@@ -1780,7 +1781,7 @@ adjustmentRecord.setValue({
             };
 
         } catch (e) {
-            log.error("error message", e.message);
+            log.error("Error in getBins", e);
 
             return {
                 status: 500,
@@ -1788,9 +1789,9 @@ adjustmentRecord.setValue({
             };
         }
     }
-	
 
-     function toSnakeCase(str) {
+
+    function toSnakeCase(str) {
         return str
             .trim()
             .replace(/[^a-zA-Z0-9 ]/g, '')
@@ -1803,6 +1804,6 @@ adjustmentRecord.setValue({
         binAdjustment: binAdjustment,
         binTransfer: binTransfer,
         getBinInventoryDetail: getBinInventoryDetail,
-		getBins : getBins
+        getBins: getBins
     };
 });

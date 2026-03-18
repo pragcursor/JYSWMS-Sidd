@@ -87,7 +87,7 @@ log.audit("Record Deleted", "Bin Transfer Internal ID: " + recId);
                         }
  
                     } catch (e) {
-                        log.error("Error Processing Record", "Record ID: " + recId + " | " + e.message);
+                        log.error("Error Processing Record", "Record ID: " + recId + " | " + e);
                     }
                 });
  
@@ -105,7 +105,7 @@ log.audit("Record Deleted", "Bin Transfer Internal ID: " + recId);
             log.audit("Process Completed", "All matching records processed.");
  
         } catch (err) {
-            log.error("Fatal Script Error", err.message);
+            log.error("Fatal Script Error", err);
         }
     }
  

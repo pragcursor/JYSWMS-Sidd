@@ -24,7 +24,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' }) || "";
             var lineLineLocation = locationId;
             var singleIf = issingleif(recordId, salesOrderId)
-            var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
+             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
 
             // if (shipVia != '57733' ) {
             //   log.error("not a P/U order",shipVia);
@@ -33,29 +33,65 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
 
             var customerId = newRec.getValue('custrecord_jyswms_customer_frm_so');
-
-            var customerLookup = search.lookupFields({
-                type: search.Type.CUSTOMER,
-                id: customerId,
-                columns: ['custentity_wms_ltl_customer']
-            });
-            var ltlCustomer = customerLookup.custentity_wms_ltl_customer;
-
-
+           // log.error("customerId", customerId);
+           
             // if (!ltlCustomer || (customerId !== '1807' && customerId !== '476')) {
             //     log.error("not an amazon order", customerId);
             //     log.error("not a P/U order", shipVia);
             //     return;
             // }
 
-            var allowedCustomers = ['1807', '476'];
+            // var allowedCustomers = ['1807', '476'];
 
-            if (!ltlCustomer && !allowedCustomers.includes(customerId)) {
-                log.debug("Skipping record", customerId);
+            // if (!ltlCustomer && !allowedCustomers.includes(customerId)) {
+            //     log.debug("Skipping record", customerId);
+            //     return;
+            // }
+
+            // log.error("amazon order", customerId);
+
+
+            // if ((customerId == '476' && shipVia != '57733') || (customerId == '473' && shipVia != '57733')) {
+            //     return;
+            // }
+
+
+            var allowedCustomers = ['476', '1807'];
+
+            // Lookup customer checkbox
+            var customerLookup = search.lookupFields({
+                type: search.Type.CUSTOMER,
+                id: customerId,
+                columns: ['custentity_wms_ltl_customer']
+            });
+
+            var ltlCustomer = customerLookup.custentity_wms_ltl_customer || false;
+
+            log.debug("LTL Customer Flag", ltlCustomer);
+
+
+            // CASE 1: P/U Orders
+            if (shipVia === '57733') {
+
+                // if (!ltlCustomer) {
+                //     log.debug("Skipping - P/U order but LTL checkbox not checked", customerId);
+                //     return;
+                // }
+
+                log.debug("P/U order with LTL customer - Script allowed", customerId);
+            }
+
+
+            // CASE 2: Non P/U Orders
+            if (shipVia !== '57733' && !allowedCustomers.includes(customerId)) {
+                log.debug("Skipping - Non P/U order and customer not allowed", customerId);
                 return;
             }
 
-            log.error("amazon order", customerId);
+            log.debug("Script execution allowed", {
+                shipVia: shipVia,
+                customerId: customerId
+            });
 
             var trackCount = newRec.getLineCount({
                 sublistId: 'recmachcustrecord_jyswms_so_header'
@@ -103,13 +139,13 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return;
             }
 
-            log.error('Trigger Info', {
-                recordId: recordId,
-                isApproved: isApproved,
-                itemFulfill: itemFulfill,
-                salesOrderId: salesOrderId,
-                totalSoQuantity: totalSoQuantity
-            });
+           // log.error('Trigger Info', {
+            //     recordId: recordId,
+            //     isApproved: isApproved,
+            //     itemFulfill: itemFulfill,
+            //     salesOrderId: salesOrderId,
+            //     totalSoQuantity: totalSoQuantity
+            // });
 
             if (isApproved && !itemFulfill && salesOrderId) {
                 //  if (isApproved && itemFulfill && salesOrderId) {
@@ -209,7 +245,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         };
                     }
                 }
-                log.error('itemIdsInOrder', itemIdsInOrder);
+               // log.error('itemIdsInOrder', itemIdsInOrder);
                 var itemName = '';
                 if (itemIdsInOrder.length === 1) {
                     // get the item type from the array 
@@ -218,7 +254,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         id: Number(itemIdsInOrder[0]),
                         columns: ['recordtype', "itemid"]
                     });
-                    log.error('itemTypeLookup', itemTypeLookup);
+                    // log.error('itemTypeLookup', itemTypeLookup);
                     itemName = itemTypeLookup.itemid || '';
                     if (itemTypeLookup.recordtype === 'noninventoryitem') {
                         // transform the sales order to item fulfillment directly
@@ -259,13 +295,13 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         }
                         itemFulfillment.setValue({ fieldId: 'shipstatus', value: 'C' });
                         var fulfillmentId = itemFulfillment.save();
-                        log.error('Item Fulfillment Created for Non Inventory Item', fulfillmentId);
+                        // log.error('Item Fulfillment Created for Non Inventory Item', fulfillmentId);
                     } else {
-                        log.error('Item is not Non Inventory Item', itemTypeLookup.recordtype);
+                        // log.error('Item is not Non Inventory Item', itemTypeLookup.recordtype);
                     }
                 }
                 if ((itemIdsInOrder.length === 1) && itemName.toLowerCase().includes('parts')) {
-                    log.error('Item is Parts - skipping fulfillment creation', itemName);
+                    // log.error('Item is Parts - skipping fulfillment creation', itemName);
                     return;
                 }
                 lines = Object.values(linesMap);
@@ -317,7 +353,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     });
                 }
 
-                log.error("FINAL MERGED LINES", JSON.stringify(lines));
+                // log.error("FINAL MERGED LINES", JSON.stringify(lines));
 
 
 
@@ -328,7 +364,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
                 trackingLineCount = 0; // updated by Vamshi to avoid creating packages
 
-                log.debug("trackingLineCount", trackingLineCount);
+                // log.debug("trackingLineCount", trackingLineCount);
 
                 var trackingMap = {}; // itemId => [tracking1, tracking2]
 
@@ -343,7 +379,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         line: j
                     });
 
-                    log.debug("trackingItemId", trackingItemId);
+                    // log.debug("trackingItemId", trackingItemId);
 
                     var trackingNumber = newRec.getSublistValue({
                         sublistId: 'recmachcustrecord_jyswms_so_header',
@@ -352,7 +388,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     });
 
                     ssccCodes.push(trackingNumber)
-                    log.debug("trackingNumber", trackingNumber);
+                    // log.debug("trackingNumber", trackingNumber);
 
                     // var weightLookup = search.lookupFields({
                     //   type: search.Type.INVENTORY_ITEM,
@@ -389,12 +425,12 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 if (totalQuantity < totalSoQuantity && !fulfillPartilly) {
                     return;
                 }
-                log.error('Fulfillment Object', JSON.stringify(obj));
+                // log.error('Fulfillment Object', JSON.stringify(obj));
 
                 if (obj) {
                     // log.error("Entering object");
                     response = FullFillOrders(obj, context.newRecord.id, itemIdsInOrder);
-                    log.error('response', JSON.stringify(response));
+                    // log.error('response', JSON.stringify(response));
 
 
                 }
@@ -462,11 +498,11 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return false; // Only one result expected
             });
 
-            log.error("Single IF Check", {
-                headerId: headerId,
-                salesOrderId: salesOrderId,
-                isSingleIf: isSingleIf
-            });
+            // log.error("Single IF Check", {
+            //     headerId: headerId,
+            //     salesOrderId: salesOrderId,
+            //     isSingleIf: isSingleIf
+            // });
 
         }
         return isSingleIf;
@@ -490,12 +526,12 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 var trackingObj = trackingLines(customRecId);
                 var ssccCodes = orderData.ssccCodes;
 
-                log.error("incoming Object - ", {
-                    ssccCodes: ssccCodes,
-                    trackingObj: trackingObj,
-                    orderData: orderData,
-                    locationId: locationId
-                });
+                        // log.error("incoming Object - ", {
+                        //     ssccCodes: ssccCodes,
+                        //     trackingObj: trackingObj,
+                        //     orderData: orderData,
+                        //     locationId: locationId
+                        // });
 
                 var singleIf = issingleif(customRecId, salesOrderId);
 
@@ -529,13 +565,13 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     } else if (Number(soHeaderLocation) === 9) {
                         singleIfDestinationBin = 4859;
                     } else {
-                        log.error("Unsupported header location for Single IF: " + soHeaderLocation);
+                        // log.error("Unsupported header location for Single IF: " + soHeaderLocation);
                     }
 
-                    log.audit("Single IF Mode", {
-                        headerLocation: soHeaderLocation,
-                        destinationBin: singleIfDestinationBin
-                    });
+                    // log.audit("Single IF Mode", {
+                    //     headerLocation: soHeaderLocation,
+                    //     destinationBin: singleIfDestinationBin
+                    // });
                 }
 
                 var itemFulfillment = record.transform({
@@ -581,7 +617,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         adjustmentObj[key] = itemData.total - availableQty;
                     }
                 }
-                log.error("adjustmentObj", adjustmentObj)
+                // log.error("adjustmentObj", adjustmentObj)
                 if (Object.keys(adjustmentObj).length > 0) {
 
                     //  var adjustmentId = createAdjustment(adjustmentObj, locationId);
@@ -781,7 +817,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
     function createAdjustment(adjustmentObj, locationId, headerID, salesOrderId) {
         try {
             if (!adjustmentObj || Object.keys(adjustmentObj).length === 0) {
-                log.error("No adjustments required");
+               // log.error("No adjustments required");
                 return null;
             }
 
@@ -895,7 +931,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             return invAdjId;
 
         } catch (e) {
-            log.error("❌ Error creating adjustment", e.name + " : " + e.message);
+            log.error("❌ Error creating adjustment", e.name + " : " + e);
             return null;
         }
     }
@@ -964,7 +1000,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             });
 
             if (Object.keys(transferMap).length === 0) {
-                log.audit("Single IF Transfer", "No transfers required");
+                // log.audit("Single IF Transfer", "No transfers required");
                 return;
             }
 
@@ -1017,7 +1053,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
                 if (existingTransferId) {
 
-                    log.audit("Using Existing Transfer", existingTransferId);
+                  //  log.audit("Using Existing Transfer", existingTransferId);
 
                     transferRec = record.load({
                         type: record.Type.INVENTORY_TRANSFER,
@@ -1027,7 +1063,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
                 } else {
 
-                    log.audit("Creating New Transfer", salesOrderId);
+                  //  log.audit("Creating New Transfer", salesOrderId);
 
                     transferRec = record.create({
                         type: record.Type.INVENTORY_TRANSFER,
@@ -1249,7 +1285,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 itemQtyMap[internalId] += parseFloat(availableQty || 0);
             });
         });
-        log.error("itemQtyMap", itemQtyMap)
+       // log.error("itemQtyMap", itemQtyMap)
         return itemQtyMap;
     }
 
@@ -1299,7 +1335,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             return results;
 
         } catch (error) {
-            log.error("Error message", error.message);
+            log.error("Error message", error);
         }
 
     }
@@ -1311,7 +1347,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return [];
             }
 
-            log.error("ssccCodes", ssccCodes);
+          //  log.error("ssccCodes", ssccCodes);
 
             // Build dynamic OR filter for all SSCC codes
             var filters = [];
@@ -1333,7 +1369,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return true;
             });
 
-            log.error('Matched Internal IDs', internalIds);
+           // log.error('Matched Internal IDs', internalIds);
             return internalIds;
 
         } catch (e) {

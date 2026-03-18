@@ -110,7 +110,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
         return itemIds;
     }
 
-  
+
     function chunkArray(arr, size) {
 
         var result = [];
@@ -122,7 +122,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
         return result;
     }
 
-  
+
     function processAllItems(context, pageSize, startIndex) {
 
         try {
@@ -158,21 +158,21 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
             batches.forEach(function (batch, index) {
 
-                
-              log.audit("Processing b", {
-                "index": index,
-                "batch": batch
-              });
+
+                log.audit("Processing b", {
+                    "index": index,
+                    "batch": batch
+                });
 
                 var context = {
                     itemIds: batch
                 };
 
                 var inventoryData = getInventoryTemp(context);
-              
-                 log.audit("Processing Batch Data", inventoryData);
-                 //var inventoryData = inventoryData.data;
-                 var apiStatus = sendData(inventoryData);
+
+                log.audit("Processing Batch Data", inventoryData);
+                //var inventoryData = inventoryData.data;
+                var apiStatus = sendData(inventoryData);
 
                 if (inventoryData && inventoryData.data) {
                     response.data = Object.assign(response.data, inventoryData.data);
@@ -182,7 +182,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
             });
             log.audit("Final Inventory Data Summary", JSON.stringify(response));
-           return true;
+            return true;
 
 
         } catch (e) {
@@ -193,7 +193,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
     }
 
-   
+
     function getInventory(context, pageSize, startIndex) {
         try {
             var ScriptStartTime = new Date().getTime();
@@ -233,7 +233,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                     }));
                     //   log.audit("item ids", itemIds);
                 } catch (e) {
-                    log.error("error pushing item filters");
+                    log.error("error pushing item filters", e);
                     var response = e.message + " - " + itemIds;
                     //   log.error("response",JSON.stringify(response));
                 }
@@ -254,7 +254,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
                 } catch (e) {
 
-                    log.error("error pushing item filters");
+                    log.error("error pushing item filters", e);
 
                     var response = e.message + " - " + binId;
 
@@ -307,7 +307,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                         itemData['bin_internalid'] = result.getValue(column) || " ";
                         itemData['bin_number'] = result.getText(column) || " ";
                         var binData = existingBinSequenceMap[binId];
-                        itemData['bin_index'] = " ";
+                        itemData['bin_index'] = binData ? binData.bin_index : " ";
                         itemData['bin_orientation'] = binData.bin_orientation || "";
                         itemData['wh'] = binData.wh || "";
                         itemData['room'] = binData.room || "";
@@ -351,138 +351,138 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 message: e.message
             };
         }
-    } 
+    }
 
 
-  function getInventoryTemp(context) {
-    try {
+    function getInventoryTemp(context) {
+        try {
 
-        var scriptObj = runtime.getCurrentScript();
-        var inventorySearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_inventory_detail' });
+            var scriptObj = runtime.getCurrentScript();
+            var inventorySearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_inventory_detail' });
 
-        var Data = {};
-        var binId = context.binId || "";
-        var itemIds = context.itemIds || "";
+            var Data = {};
+            var binId = context.binId || "";
+            var itemIds = context.itemIds || "";
 
-        var existingBinSequenceMap = BinSequenceSearch();
+            var existingBinSequenceMap = BinSequenceSearch();
 
-        var inventorySearch = search.load({
-            id: inventorySearchId,
-            type: search.Type.ITEM
-        });
+            var inventorySearch = search.load({
+                id: inventorySearchId,
+                type: search.Type.ITEM
+            });
 
-        var filters = inventorySearch.filters || [];
+            var filters = inventorySearch.filters || [];
 
-        if (itemIds) {
-            filters.push(search.createFilter({
-                name: 'internalid',
-                operator: search.Operator.ANYOF,
-                values: itemIds
-            }));
-        }
+            if (itemIds) {
+                filters.push(search.createFilter({
+                    name: 'internalid',
+                    operator: search.Operator.ANYOF,
+                    values: itemIds
+                }));
+            }
 
-        if (binId) {
-            filters.push(search.createFilter({
-                name: 'binnumber',
-                join: "binOnHand",
-                operator: search.Operator.ANYOF,
-                values: binId
-            }));
-        }
+            if (binId) {
+                filters.push(search.createFilter({
+                    name: 'binnumber',
+                    join: "binOnHand",
+                    operator: search.Operator.ANYOF,
+                    values: binId
+                }));
+            }
 
-        inventorySearch.filters = filters;
+            inventorySearch.filters = filters;
 
-        var pagedData = inventorySearch.runPaged({
-            pageSize: 1000
-        });
+            var pagedData = inventorySearch.runPaged({
+                pageSize: 1000
+            });
 
-        var totalCount = pagedData.count;
+            var totalCount = pagedData.count;
 
-        pagedData.pageRanges.forEach(function (pageRange) {
+            pagedData.pageRanges.forEach(function (pageRange) {
 
-            var page = pagedData.fetch({ index: pageRange.index });
+                var page = pagedData.fetch({ index: pageRange.index });
 
-            page.data.forEach(function (result) {
+                page.data.forEach(function (result) {
 
-                var internalId = result.getValue({ name: "internalid" });
-                var locationId = result.getValue({ name: "location", join: "binOnHand" });
-                var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
+                    var internalId = result.getValue({ name: "internalid" });
+                    var locationId = result.getValue({ name: "location", join: "binOnHand" });
+                    var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
 
-                if (!internalId || !locationId) return;
+                    if (!internalId || !locationId) return;
 
-                if (!Data[internalId]) {
-                    Data[internalId] = {};
-                }
-
-                if (!Data[internalId][locationId]) {
-                    Data[internalId][locationId] = {
-                        total_available: 0,
-                        itemDetails: []
-                    };
-                }
-
-                var itemData = {};
-
-                result.columns.forEach(function (column) {
-
-                    var columnName = toSnakeCase(column.label || column.name);
-
-                    if (columnName == 'location') {
-
-                        itemData['loc_internalid'] = result.getValue(column) || " ";
-                        itemData['location'] = result.getText(column) || " ";
-
-                    } else if (columnName == 'bin_number') {
-
-                        var binInternalId = result.getValue(column);
-
-                        itemData['bin_internalid'] = binInternalId || " ";
-                        itemData['bin_number'] = result.getText(column) || " ";
-
-                        var binData = existingBinSequenceMap[binInternalId] || {};
-
-                        itemData['bin_index'] = binData.bin_index || " ";
-                        itemData['bin_orientation'] = binData.bin_orientation || "";
-                        itemData['wh'] = binData.wh || "";
-                        itemData['room'] = binData.room || "";
-                        itemData['aisle_no'] = binData.aisle_no || "";
-                        itemData['bin'] = binData.bin || "";
-
-                    } else {
-
-                        itemData[columnName] = result.getText(column) || result.getValue(column);
-
+                    if (!Data[internalId]) {
+                        Data[internalId] = {};
                     }
-                });
 
-                Data[internalId][locationId].itemDetails.push(itemData);
-                Data[internalId][locationId].total_available += availableQty;
+                    if (!Data[internalId][locationId]) {
+                        Data[internalId][locationId] = {
+                            total_available: 0,
+                            itemDetails: []
+                        };
+                    }
+
+                    var itemData = {};
+
+                    result.columns.forEach(function (column) {
+
+                        var columnName = toSnakeCase(column.label || column.name);
+
+                        if (columnName == 'location') {
+
+                            itemData['loc_internalid'] = result.getValue(column) || " ";
+                            itemData['location'] = result.getText(column) || " ";
+
+                        } else if (columnName == 'bin_number') {
+
+                            var binInternalId = result.getValue(column);
+
+                            itemData['bin_internalid'] = binInternalId || " ";
+                            itemData['bin_number'] = result.getText(column) || " ";
+
+                            var binData = existingBinSequenceMap[binInternalId] || {};
+
+                            itemData['bin_index'] = binData.bin_index || " ";
+                            itemData['bin_orientation'] = binData.bin_orientation || "";
+                            itemData['wh'] = binData.wh || "";
+                            itemData['room'] = binData.room || "";
+                            itemData['aisle_no'] = binData.aisle_no || "";
+                            itemData['bin'] = binData.bin || "";
+
+                        } else {
+
+                            itemData[columnName] = result.getText(column) || result.getValue(column);
+
+                        }
+                    });
+
+                    Data[internalId][locationId].itemDetails.push(itemData);
+                    Data[internalId][locationId].total_available += availableQty;
+
+                });
 
             });
 
-        });
+            return {
+                status: 200,
+                message: 'Data retrieved successfully',
+                summary: {
+                    total_records: totalCount
+                },
+                data: Data
+            };
 
-        return {
-            status: 200,
-            message: 'Data retrieved successfully',
-            summary: {
-                total_records: totalCount
-            },
-            data: Data
-        };
+        } catch (e) {
 
-    } catch (e) {
+            log.error("error message", e);
 
-        log.error("error message", e);
-
-        return {
-            status: 500,
-            message: e.message
-        };
+            return {
+                status: 500,
+                message: e.message
+            };
+        }
     }
-}
 
-  
+
 
 
 
@@ -515,8 +515,8 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                     var binId = result.getValue({ name: 'internalid' });
                     var sequenceNumber = parseFloat(result.getValue({
                         name: "custrecord_jyswms_sequence_number"
-                    })) || 0;
-
+                    })) || " ";
+                    // even if sequence number is missing, we want to include the bin in the map with empty sequence to avoid missing bin details in inventory response
                     existingBinSequenceMap[binId] = {
                         "bin_index": sequenceNumber,
                         "bin_orientation": result.getValue({ name: "custrecord_bin_position" }),
@@ -680,10 +680,119 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
             .toLowerCase();
     }
 
+
+    function process_No_Inv_items(context) {
+        try {
+            var record = require('N/record');
+            var search = require('N/search');
+            var task = require('N/task');
+            var log = require('N/log');
+
+            var data = context.data || [];
+            var uniqueMap = {};
+            var uniqueItems = [];
+
+            if (!data || !data.length) {
+                log.error("No data received", context);
+                return;
+            }
+
+            // 🔹 Deduplicate
+            for (var i = 0; i < data.length; i++) {
+                var itemId = data[i] && data[i].item_internalid;
+                if (itemId && !uniqueMap[itemId]) {
+                    uniqueMap[itemId] = true;
+                    uniqueItems.push(itemId);
+                }
+            }
+
+            log.audit("Total unique items", uniqueItems.length);
+
+            // =====================================================
+            // 🚀 SMALL PAYLOAD → DIRECT PROCESSING
+            // =====================================================
+            if (uniqueItems.length <= 200) {
+
+                for (var j = 0; j < uniqueItems.length; j++) {
+                    var itemId = uniqueItems[j];
+
+                    try {
+                        var itemRec;
+
+                        // 🔹 FAST PATH (assume inventory item)
+                        try {
+                            itemRec = record.load({
+                                type: record.Type.INVENTORY_ITEM,
+                                id: itemId,
+                                isDynamic: false
+                            });
+                        } catch (loadErr) {
+                            // 🔁 FALLBACK: detect type
+                            var lookup = search.lookupFields({
+                                type: search.Type.ITEM,
+                                id: itemId,
+                                columns: ['recordtype']
+                            });
+
+                            var itemType = lookup.recordtype;
+                            if (!itemType) {
+                                log.error("Item type not found", itemId);
+                                continue;
+                            }
+
+                            itemRec = record.load({
+                                type: itemType,
+                                id: itemId,
+                                isDynamic: false
+                            });
+                        }
+
+                        // 🔹 Save
+                        itemRec.save({
+                            enableSourcing: false,
+                            ignoreMandatoryFields: true
+                        });
+
+                    } catch (innerErr) {
+                        log.error("Error processing itemId: " + itemId, innerErr);
+                    }
+                }
+
+                log.audit("Processed in Restlet", uniqueItems.length);
+            }
+
+            // =====================================================
+            // 🔥 LARGE PAYLOAD → MAP/REDUCE
+            // =====================================================
+            else {
+                var mrTask = task.create({
+                    taskType: task.TaskType.MAP_REDUCE,
+                    scriptId: 'customscript_item_process_mr',
+                    params: {
+                        custscript_item_payload: JSON.stringify(uniqueItems)
+                    }
+                });
+
+                var taskId = mrTask.submit();
+
+                log.audit("MR Triggered", {
+                    taskId: taskId,
+                    totalItems: uniqueItems.length
+                });
+            }
+
+        } catch (e) {
+            log.error("Fatal error in processItemsHybrid", e);
+        }
+    }
+
+
+
     return {
         getCounts: getCounts,
         getInventory: getInventory,
         getItemInventorydata: getItemInventorydata,
-        processAllItems: processAllItems
+        processAllItems: processAllItems,
+        process_No_Inv_items: process_No_Inv_items
     };
 });

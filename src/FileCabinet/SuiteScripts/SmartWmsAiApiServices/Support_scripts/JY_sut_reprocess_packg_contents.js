@@ -91,7 +91,7 @@ define([
                 if (!track.trackingNumber) return;
 
                 if (!packageIndexMap[track.trackingNumber]) {
-                    
+
                     var itemId = getItemIdByName(track.itemName);
                     log.error('Item ID', itemId);
                     var weight = getItemWeight(itemId);
@@ -352,6 +352,11 @@ define([
             fulfillmentRec.setCurrentSublistValue({
                 sublistId: sublistId,
                 fieldId: 'custrecord_jyswms_item_not_populated',
+                value: true
+            });
+            fulfillmentRec.setCurrentSublistValue({
+                sublistId: sublistId,
+                fieldId: 'custrecord_jyswms_createdfrom',
                 value: true
             });
 

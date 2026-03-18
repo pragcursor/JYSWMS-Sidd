@@ -32,7 +32,7 @@ define([
 
         const token = tokenModule.generateToken();
         if (!token) {
-            log.error('SEND DATA - Token Failed', 'Token generation failed');
+           // log.error('SEND DATA - Token Failed', 'Token generation failed');
             return;
         }
 
@@ -294,15 +294,15 @@ define([
                 const alternateAvailable =
                     (inventoryMap[itemId][alternateLoc]) || 0;
 
-                log.error('INVENTORY DECISION for SOID: ' + soId, {
-                    line: i,
-                    itemId,
-                    qtyRequired,
-                    currentLoc,
-                    currentAvailable,
-                    alternateLoc,
-                    alternateAvailable
-                });
+                // log.error('INVENTORY DECISION for SOID: ' + soId, {
+                //     line: i,
+                //     itemId,
+                //     qtyRequired,
+                //     currentLoc,
+                //     currentAvailable,
+                //     alternateLoc,
+                //     alternateAvailable
+                // });
 
                 if (currentAvailable >= qtyRequired) {
                     log.debug('DECISION for SOID: ' + soId, 'Sufficient at current location');
@@ -518,7 +518,7 @@ define([
                         salesOrderItemId: Array.from(closedItemIds)
                     };
 
-                    log.error('CLOSED ITEMS DETECTED', payload);
+                  //  log.error('CLOSED ITEMS DETECTED', payload);
 
                     const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload);
 
@@ -709,7 +709,7 @@ define([
 
         const token = tokenModule.generateToken();
         if (!token) {
-            log.error('SEND CLOSED DATA - Token Failed', 'Token generation failed');
+          //  log.error('SEND CLOSED DATA - Token Failed', 'Token generation failed');
             return;
         }
 

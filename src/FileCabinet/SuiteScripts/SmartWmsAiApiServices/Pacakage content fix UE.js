@@ -16,8 +16,16 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var swms = context.newRecord.getValue({
                 fieldId: 'custrecord_jyswms_createdfrom'
             });
-            if (!swms) {
-                log.debug('Exit', 'Not created from SWMS');
+
+            var issue = context.newRecord.getValue({
+                fieldId: 'custrecord_jyswms_item_not_populated'
+            });
+            // if (!swms) {
+            //     log.debug('Exit', 'Not created from SWMS');
+            //     return;
+            // }
+            if(!issue) {
+                log.debug('Exit', 'Item already populated');
                 return;
             }
             var pkgRec = record.load({
@@ -45,7 +53,9 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
             itemName = itemName.replace(/\/.*$/, '').trim();
             var itemId = getItemId(itemName);
+
             //log.debug('itemId', itemId);
+          
             if (!itemId) return;
 
             var sublistId = 'recmachcustrecordhj_tc_pkgcont_lineitemparent';
@@ -76,7 +86,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             /** ------------------------------------------ */
 
             var itemDetails = getItemDetails(tranId, itemId);
-            // //log.debug('itemDetails', itemDetails);
+           log.debug('itemDetails', itemDetails);
             if (!itemDetails || !itemDetails.length) return;
             var updated = false;
             // FORCE SINGLE LINE

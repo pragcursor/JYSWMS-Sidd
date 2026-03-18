@@ -27,80 +27,124 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
             var canadaCustomerId = newRec.getValue({ fieldId: 'custrecord_jyswms_customer_frm_so' });
 
-             var status = newRec.getValue('custrecord_jyswms_order_status');
-   
-          // if (status == '18' || status == '17') {
+            var status = newRec.getValue('custrecord_jyswms_order_status');
 
-          //   if(!itemFulfill) {
-          //   itemFulfill =  true;
-          // // isPackageUpdated = true;
-          //   isUpsPackageUpdated = true;
-          //   }
+            // if (status == '18' || status == '17') {
 
-          // }
-        
+            //   if(!itemFulfill) {
+            //   itemFulfill =  true;
+            // // isPackageUpdated = true;
+            //   isUpsPackageUpdated = true;
+            //   }
+            // }
+            //   if (salesOrderId != "62919500") {
 
-        //   if (salesOrderId != "62919500") {
 
-            
-        // log.debug("salesOrderId ",{
-        //     salesOrderId: salesOrderId,
-        //     recordId: recordId
-        //   });
+            // log.debug("salesOrderId ",{
+            //     salesOrderId: salesOrderId,
+            //     recordId: recordId
+            //   });
 
-          //   return;
-          // }
+            //   return;
+            // }
 
-          if (!carrierProNumber && shipVia == '57733') {
 
-          log.debug("salesOrderId -- no carrier",{
-            salesOrderId: salesOrderId,
-            recordId: recordId
-          });
-            return;
-          }
 
             var donttrigger = newRec.getValue('custrecord_jys_dont_trigger');
             if (donttrigger && carrierProNumber) {
-                 log.debug("salesOrderId --donttrigger",{
-            salesOrderId: salesOrderId,
-            recordId: recordId
-          });
+                log.debug("salesOrderId --donttrigger", {
+                    salesOrderId: salesOrderId,
+                    recordId: recordId
+                });
 
-              //salesOrderId = "62919500";
+                //salesOrderId = "62919500";
             }
             if (!isApproved) {
                 return;
             }
-           var locationId = "";
 
-if (salesOrderId) {
-            var locationLookup = search.lookupFields({
-                type: search.Type.SALES_ORDER,
-                id: salesOrderId,
-                columns: ['location', 'entity']
+            if (!carrierProNumber && shipVia == '57733') {
+
+                log.debug("salesOrderId -- no carrier", {
+                    salesOrderId: salesOrderId,
+                    recordId: recordId
+                });
+
+            }
+            var locationId = "";
+
+            if (salesOrderId) {
+                var locationLookup = search.lookupFields({
+                    type: search.Type.SALES_ORDER,
+                    id: salesOrderId,
+                    columns: ['location', 'entity']
+                });
+
+                locationId = (locationLookup.location && locationLookup.location.length)
+                    ? locationLookup.location[0].value
+                    : null;
+
+                canadaCustomerId = (locationLookup.entity && locationLookup.entity.length)
+                    ? locationLookup.entity[0].value
+                    : null;
+            }
+
+            // Determine execution conditions
+
+            var allowedCustomers = ['476', '1807'];
+
+            var ltlCustomer = false;
+
+            // Only lookup checkbox if P/U
+            if (shipVia == '57733') {
+
+                var customerLookup = search.lookupFields({
+                    type: search.Type.CUSTOMER,
+                    id: canadaCustomerId,
+                    columns: ['custentity_wms_ltl_customer']
+                });
+
+                ltlCustomer = customerLookup.custentity_wms_ltl_customer || false;
+
+                // if (!ltlCustomer) {
+                //     log.debug("Skipping script - P/U order but LTL checkbox not checked", {
+                //         shipVia: shipVia,
+                //         customerId: canadaCustomerId
+                //     });
+                //     return;
+                // }
+            }
+
+            // Non P/U orders
+            if (shipVia != '57733' && !allowedCustomers.includes(String(canadaCustomerId))) {
+
+                log.debug("Skipping script - Non P/U order and customer not allowed", {
+                    shipVia: shipVia,
+                    customerId: canadaCustomerId
+                });
+
+                return;
+            }
+
+            log.debug("Script execution allowed", {
+                shipVia: shipVia,
+                customerId: canadaCustomerId
             });
 
-            locationId = (locationLookup.location && locationLookup.location.length)
-                ? locationLookup.location[0].value
-                : null;
 
-         canadaCustomerId = (locationLookup.entity && locationLookup.entity.length)
-                ? locationLookup.entity[0].value
-                : null;
-}
+            //  if (!shipVia || shipVia != 57733) {
 
-
-
-
-            if (!shipVia || shipVia != 57733) {
+            if (shipVia != '57733') {
+                // if ((canadaCustomerId != 476) && (canadaCustomerId != 473) && (canadaCustomerId != 1807)) {
+                //     return;
+                // }
 
                 if (itemFulfill) {
 
                     var trackingObj = trackingLines(recordId);
 
                     if (!isUpsPackageUpdated) {
-                        log.error(" isUpsPackageUpdated", trackingObj);
+                      //  log.error(" isUpsPackageUpdated", trackingObj);
                         var updatedRecord = createPackages(trackingObj, itemFulfill);
 
                         record.submitFields({
@@ -133,7 +177,7 @@ if (salesOrderId) {
                     }
 
                     if (!isAmazonUpdated) {
-                        log.error(" isAmazonUpdated");
+                       // log.error(" isAmazonUpdated");
                         var updatedRecord = createAmazonRecords(trackingObj, salesOrderId, shipVia);
                         // return;
                     }
@@ -209,45 +253,39 @@ if (salesOrderId) {
                 ssccCodes: ssccCodes
             };
 
-            log.error('Fulfillment Object', JSON.stringify(obj, null, 2));
+           // log.error('Fulfillment Object', JSON.stringify(obj, null, 2));
 
             //  var packageIds = getInternalIdsBySsccCodes(ssccCodes);
             //log.error('packageIds Object', JSON.stringify(packageIds, null, 2));
 
-            if (isApproved && salesOrderId && !itemFulfill) {
-                // Process fulfillment
-                //   var response = FullFillOrders(obj, recordId);
-                //log.error('response', JSON.stringify(response));
-            }
+           // log.error('canadaCustomerId', canadaCustomerId);
 
-            if ((itemFulfill && !isPackageUpdated && carrierProNumber) || (salesOrderId == "60469154") || (canadaCustomerId == "1807")) {
 
-                log.error("pa records update ");
+            if ((itemFulfill && carrierProNumber)
+                || canadaCustomerId == "1807"
+                || canadaCustomerId == "473") {
+
+              //  log.error('canadaCustomerId -', canadaCustomerId);
 
                 if (!isPackageUpdated) {
                     var res = createPackageRecords(ssccCodes, trackingObj, itemFulfill, carrierProNumber, recordId);
-                    log.error("isPackageUpdated", res);
+                    // log.error("isPackageUpdated", res);
                 }
-
-
-
-
 
                 if (!isAmazonUpdated) {
-                    log.error("amazon records update ");
                     var res = regularCreateAmazonRecords(trackingObj, salesOrderId);
-                    log.error("amazon records update", res);
+                    // log.error("amazon records update", res);
                 }
 
 
             }
 
 
-            if ((isPackageUpdated && !isAmazonUpdated && carrierProNumber && itemFulfill) || (salesOrderId == "60469154") || (canadaCustomerId == "1807")) {
-                log.error("amazon records update ");
-                var res = regularCreateAmazonRecords(trackingObj, salesOrderId);
-                log.error("res", res);
-            }
+            // if ((isPackageUpdated && !isAmazonUpdated && carrierProNumber && itemFulfill) || (canadaCustomerId == "473") || (canadaCustomerId == "1807")) {
+            //     log.error('canadaCustomerId --', canadaCustomerId);
+            //     var res = regularCreateAmazonRecords(trackingObj, salesOrderId);
+            //     log.error("res", res);
+            // }
 
         } catch (e) {
             log.error('afterSubmit error', e.message);
@@ -282,7 +320,7 @@ if (salesOrderId) {
                 removecount++;
             }
 
-            log.error("removedcount", removecount)
+           // log.error("removedcount", removecount)
 
             // Add new package lines
             var packageBoxNumber = 0;
@@ -338,7 +376,7 @@ if (salesOrderId) {
                 });
 
                 fulfillmentRec.commitLine({ sublistId });
-                log.error('Package line added', JSON.stringify(fieldMap));
+               // log.error('Package line added', JSON.stringify(fieldMap));
             });
 
             fulfillmentRec.save({
@@ -346,7 +384,7 @@ if (salesOrderId) {
                 ignoreMandatoryFields: true
             });
 
-            log.error('New Packages Created', `Fulfillment ID: ${fulfillmentId}`);
+            // log.error('New Packages Created', `Fulfillment ID: ${fulfillmentId}`);
             //  }
 
         } catch (error) {
@@ -369,7 +407,7 @@ if (salesOrderId) {
 
             var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
             var existingCount = fulfillmentRec.getLineCount({ sublistId });
-            log.error("existingCount - recmachcustrecord_hj_packagecontents_sublist ", existingCount)
+           // log.error("existingCount - recmachcustrecord_hj_packagecontents_sublist ", existingCount)
 
             var removecount = 0;
 
@@ -378,14 +416,14 @@ if (salesOrderId) {
                 fulfillmentRec.removeLine({ sublistId, line: i, ignoreRecalc: true });
                 removecount++;
             }
-            log.error("removedcount", removecount);
+            // log.error("removedcount", removecount);
 
             // Add new package lines
             // var packageBoxNumber = 0;
             var lastRecordId = null;
             var seenTrackingNumbers = {};
 
-            log.error('trackingObj', trackingObj);
+            // log.error('trackingObj', trackingObj);
             trackingObj.forEach(function (line) {
 
                 var tracking = line.tracking;
@@ -402,7 +440,7 @@ if (salesOrderId) {
                 if (canadaCustomerId == "1807" || canadaCustomerId == "476") {
                     //Skip duplicate tracking numbers
                     if (seenTrackingNumbers[tracking]) {
-                        log.error('Duplicate tracking skipped', tracking);
+                        // log.error('Duplicate tracking skipped', tracking);
                         return;
                     }
 
@@ -436,7 +474,7 @@ if (salesOrderId) {
 
                 Object.keys(fieldMap).forEach(function (fieldId) {
 
-                    log.error("fieldMap", JSON.stringify(fieldMap));
+                    // log.error("fieldMap", JSON.stringify(fieldMap));
 
                     var value = fieldMap[fieldId];
                     if (value !== null && value !== '' && value !== undefined) {
@@ -447,13 +485,13 @@ if (salesOrderId) {
                                 value: value
                             });
                         } catch (err) {
-                            log.debug('Skipped field', `${fieldId} - ${err.message}`);
+                            log.error('Skipped field', `${fieldId} - ${err.message}`);
                         }
                     }
                 });
 
                 fulfillmentRec.commitLine({ sublistId });
-                log.debug('Package line added', JSON.stringify(fieldMap));
+                // log.debug('Package line added', JSON.stringify(fieldMap));
             });
 
             fulfillmentRec.save({
@@ -479,8 +517,8 @@ if (salesOrderId) {
                 log.debug('No SSCC codes provided, skipping Amazon record creation');
                 return;
             }
-            log.error("trackingObj", trackingObj);
-            log.error("salesOrderId", salesOrderId);
+            // log.error("trackingObj", trackingObj);
+            // log.error("salesOrderId", salesOrderId);
             var salesOrderRec = record.load({
                 type: record.Type.SALES_ORDER,
                 id: salesOrderId,
@@ -592,8 +630,8 @@ if (salesOrderId) {
                 log.debug('No SSCC codes provided, skipping Amazon record creation');
                 return;
             }
-            log.error("trackingObj", trackingObj);
-            log.error("salesOrderId", salesOrderId);
+           // log.error("trackingObj", trackingObj);
+            // log.error("salesOrderId", salesOrderId);
             var salesOrderRec = record.load({
                 type: record.Type.SALES_ORDER,
                 id: salesOrderId,
@@ -704,11 +742,11 @@ if (salesOrderId) {
     function createPackageRecords(ssccCodes, trackingObj, fulfillmentId, carrierProNumber, recordId) {
         try {
 
-            log.error("Debug Info", {
-                ssccCodes: ssccCodes,
-                trackingObj: trackingObj,
-                fulfillmentId: fulfillmentId
-            });
+            // log.error("Debug Info", {
+            //     ssccCodes: ssccCodes,
+            //     trackingObj: trackingObj,
+            //     fulfillmentId: fulfillmentId
+            // });
             var carrierProNumber = carrierProNumber;
 
 
@@ -719,11 +757,11 @@ if (salesOrderId) {
 
             // Get existing package IDs
             var packageIds = getInternalIdsBySsccCodes(ssccCodes);
-            log.error("packageIds", packageIds);
+            // log.error("packageIds", packageIds);
 
             // CASE 1: Create new package records if none found
             if (!packageIds || packageIds.length === 0) {
-                log.error("packageIds.length - ", packageIds.length);
+                // log.error("packageIds.length - ", packageIds.length);
 
                 var fulfillmentRec = record.load({
                     type: record.Type.ITEM_FULFILLMENT,
@@ -769,7 +807,7 @@ if (salesOrderId) {
                                     value: value
                                 });
                             } catch (err) {
-                                log.debug('Skipped field', `${fieldId} - ${err.message}`);
+                                log.error('Skipped field', `${fieldId} - ${err.message}`);
                             }
                         }
                     });
@@ -777,7 +815,7 @@ if (salesOrderId) {
                     packageBoxNumber++;
 
                     fulfillmentRec.commitLine({ sublistId });
-                    log.debug('Package line added', JSON.stringify(fieldMap));
+                  // log.debug('Package line added', JSON.stringify(fieldMap));
                 });
 
                 fulfillmentRec.save({
@@ -791,7 +829,7 @@ if (salesOrderId) {
             // CASE 2: Packages already exist → link them to fulfillment
             else {
 
-                log.debug('Existing Package IDs', packageIds);
+              //  log.debug('Existing Package IDs', packageIds);
 
                 try {
                     var fulfillmentRec = record.load({
@@ -809,10 +847,10 @@ if (salesOrderId) {
                         linesremovedCount++;
                     }
                     if (linesremovedCount > 0) {
-                        log.error("linesremovedCount", linesremovedCount);
+                        // log.error("linesremovedCount", linesremovedCount);
                     }
                 } catch (error) {
-                    log.error("error while lines ", error.message)
+                    log.error("error while lines ", error)
                 }
 
                 var packageBoxNumber = 0;
@@ -832,10 +870,10 @@ if (salesOrderId) {
                             }
                         });
 
-                        log.debug('Linked Existing Package', {
-                            packageId: pkgId,
-                            fulfillmentId: fulfillmentId
-                        });
+                        // log.debug('Linked Existing Package', {
+                        //     packageId: pkgId,
+                        //     fulfillmentId: fulfillmentId
+                        // });
                     } catch (err) {
                         log.error('Error Linking Package', err.message);
                     }
@@ -872,7 +910,7 @@ if (salesOrderId) {
                     linesCountwithNoPlattet++;
                 }
             }
-            log.error("linesCountwithNoPlattet", linesCountwithNoPlattet);
+            // log.error("linesCountwithNoPlattet", linesCountwithNoPlattet);
 
             // 🔹 Mark main fulfillment detail record as updated
             if (trackingObj && trackingObj.length) {
@@ -885,14 +923,14 @@ if (salesOrderId) {
                             custrecord_jyswms_package_updated: true
                         }
                     });
-                    log.debug('Fulfillment Detail Updated', `Record ID: ${firstTracking.recordId}`);
+                    // log.debug('Fulfillment Detail Updated', `Record ID: ${firstTracking.recordId}`);
                 }
             }
 
             log.audit('Package Processing Complete', `Fulfillment: ${fulfillmentId}`);
 
         } catch (e) {
-            log.error('Error in createPackageRecords', e.message);
+            log.error('Error in createPackageRecords', e);
         }
     }
 
@@ -948,7 +986,7 @@ if (salesOrderId) {
             });
 
         } catch (e) {
-            log.error("Error in trackingLines", e.message);
+            log.error("Error in trackingLines", e);
         }
         return results;
     }
@@ -985,7 +1023,7 @@ if (salesOrderId) {
             });
 
         } catch (e) {
-            log.error('Error in InternalIdsBySsccCodes', e.message);
+            log.error('Error in InternalIdsBySsccCodes', e);
         }
         return ids;
     }
@@ -1027,7 +1065,7 @@ if (salesOrderId) {
                 }
             }
         } catch (e) {
-            log.error('beforeLoad error', e.message);
+            log.error('beforeLoad error', e);
         }
     }
 
