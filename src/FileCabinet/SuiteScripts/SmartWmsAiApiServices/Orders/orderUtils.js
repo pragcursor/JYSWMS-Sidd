@@ -5,6 +5,28 @@
 define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (record, file, search, log, runtime) {
 
 
+
+    //   return {
+    //     getOrders: getOrders,
+    //     dropShipmentData: dropShipmentData,
+    //     getDropShipOrders: getDropShipOrders,
+    //     getAmzlOrders: getAmzlOrders,
+    //     getOrdersDUP: getOrdersDUP,
+    //     getOrdersOptimized: getOrdersOptimized,
+    //     getInboundRecords: getInboundRecords,
+    //     transformInboundShipmentToItemReceipt: transformInboundShipmentToItemReceipt,
+    //     getLTLOrders: getLTLOrders,
+    //     getDropShipOrdersPerOrder: getDropShipOrdersPerOrder,
+    //     getUnpicked: getUnpicked,
+    //     processPalletUpdate: processPalletUpdate,
+    //     createImageFile: createImageFile,
+    //     processInbound: processInbound,
+    //     getDropShipOrders_partials: getDropShipOrders_partials,
+    //     getDropShipOrders_helperfunction: getDropShipOrders_helperfunction,
+    // };
+
+
+
     function getDropShipOrdersPerOrder(context, pageSize, startIndex) {
         try {
 
@@ -776,13 +798,13 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                         }),
                         search.createColumn({
                             name: "formulatext",
-                            formula: "CASE    WHEN {location} = 'L60-Hardeeville_SC' THEN     'JONATHAN Y DESIGNS L60, ' || {location.address1} ||     CASE WHEN {location.city} IS NOT NULL THEN ', ' || {location.city} ELSE '' END ||     CASE WHEN {location.state} IS NOT NULL THEN ', ' || {location.state} ELSE '' END ||     CASE WHEN {location.zip} IS NOT NULL THEN ' ' || {location.zip} ELSE '' END    WHEN {location} = 'Flemington L41' THEN     'JONATHAN Y DESIGNS L41, ' || {location.address1} ||     CASE WHEN {location.city} IS NOT NULL THEN ', ' || {location.city} ELSE '' END ||     CASE WHEN {location.state} IS NOT NULL THEN ', ' || {location.state} ELSE '' END ||     CASE WHEN {location.zip} IS NOT NULL THEN ' ' || {location.zip} ELSE '' END END",
+                            formula: "CASE       WHEN {location} = 'L60-Hardeeville_SC' THEN                {customer.custentity20} || ', ' ||         {customer.custentity_ns_sc_from_name_2} || ', ' ||         {customer.custentity21} ||         CASE              WHEN {customer.custentity23} IS NOT NULL              THEN ', ' || {customer.custentity23}              ELSE ''          END ||         CASE              WHEN {customer.custentity24} IS NOT NULL              THEN ', ' || {customer.custentity24}              ELSE ''          END ||         CASE              WHEN {customer.custentity25} IS NOT NULL              THEN ', ' || {customer.custentity25}              ELSE ''          END        ELSE                {customer.custentity_ship_from_name} || ', ' ||         {customer.custentity_ns_l41_from_name_2} || ', ' ||         {customer.custentity_address_one} ||         CASE              WHEN {customer.custentity_city} IS NOT NULL              THEN ', ' || {customer.custentity_city}              ELSE ''          END ||         CASE              WHEN {customer.custentity_state} IS NOT NULL              THEN ', ' || {customer.custentity_state}              ELSE ''          END ||         CASE              WHEN {customer.custentity_zip} IS NOT NULL              THEN ', ' || {customer.custentity_zip}              ELSE ''          END END",
                             summary: "GROUP",
                             label: "shipFromFormula"
                         }),
                         search.createColumn({
                             name: "formulatext",
-                            formula: "'Amazon.com, ' ||  CASE WHEN {shipaddressee} IS NOT NULL THEN {shipaddressee} ELSE ' ' END || ', ' ||  NVL({shipaddress1}, ' ') || ' & ' ||   NVL({shipaddress2}, ' ') || ', ' ||  NVL({shipcity}, ' ') || ', ' ||  NVL({shipstate}, ' ') || ', ' ||  NVL({shipzip}, ' ')",
+                            formula: "NVL({shipattention},' ') || ', ' ||NVL({shipaddressee},' ') || ', ' ||NVL({shipaddress1},' ') || ' & ' ||NVL({shipaddress2},' ') || ', ' ||NVL({shipcity},' ') || ', ' ||NVL({shipstate},' ') || ', ' ||NVL({shipzip},' ')  ",
                             summary: "GROUP",
                             label: "shipToFormula"
                         }),
@@ -1200,6 +1222,36 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             if (customrecId && fileId) {
 
                 var customRec = record.load({
+                    type: 'customrecord_order_fulfillment_details',
+                    id: customrecId,
+                    isDynamic: false
+                });
+
+
+                customRec.setValue({
+                    fieldId: 'custrecord_jyswms_approved',
+                    value: true
+                });
+
+                customRec.setValue({
+                    fieldId: 'custrecord_jyswms_is_partially_fulfilled',
+                    value: true
+                });
+
+                customRec.setValue({
+                    fieldId: 'custrecord_jyswmws_perform_update',
+                    value: true
+                });
+
+
+                customRec.save({
+                    enableSourcing: false,
+                    ignoreMandatoryFields: true
+                });
+
+                log.error('Custom Record Updated', 'CustomRec ID: ' + customrecId);
+
+                customRec = record.load({
                     type: 'customrecord_order_fulfillment_details',
                     id: customrecId,
                     isDynamic: false
@@ -4639,7 +4691,9 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                     }
 
                     // Prepare cartonInfo base properties used per bin
-                    var itemslength = parsedSoItemsArr.length || 0;
+                    //  var itemslength = parsedSoItemsArr.length || 0;
+
+                    var itemslength = result.getValue({ name: 'custbody_so_total_qty' }) || parsedSoItemsArr.length;
 
                     // Get bin rows for this item/result — helper returns an ARRAY (guaranteed)
                     var existBinArr = getBinTransferinfo(result, itemPrimaryUnitsMap); // always array
@@ -5601,6 +5655,8 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             // Primary Unit Conversion applied once to lineQuantityRaw
             var convertedLineQuantity = quantity;
 
+
+
             if (itemPrimaryUnitsMap && itemPrimaryUnitsMap[itemId]) {
                 var itemObj = itemPrimaryUnitsMap[itemId];
                 var rate = parseInt(itemObj?.rate || 1);
@@ -6008,20 +6064,10 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
     // below function is added by sidd to use in userevents dont touch this.
 
 
-    /**
- * Optimized Drop Ship Order Retrieval
- * Keeps SAME output fields used by your current external system
- * Optimized for small number of Sales Orders
- */
-
     // function getDropShipOrders_helperfunction(context, pageSize, startIndex) {
-
     //     try {
-
     //         var scriptObj = runtime.getCurrentScript();
-
     //         var headerSearch = search.load({ id: 4797 });
-
     //         var filters = [];
 
     //         if (context.salesOrderHeaderId) {
@@ -6036,267 +6082,246 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
     //             headerSearch.filters = (headerSearch.filters || []).concat(filters);
     //         }
 
-    //         var headerResults = headerSearch.run().getRange({
-    //             start: startIndex || 0,
-    //             end: (startIndex || 0) + (pageSize || 100)
-    //         });
+    //         // Pagination
+    //         var pSize = context.pageSize || context.page_size || pageSize;
+    //         var reqPage = context.startIndex || context.page_number || startIndex;
+
+    //         var limit = pSize ? parseInt(pSize, 10) : 1000;
+    //         if (limit > 1000) limit = 1000;
+
+    //         var parsedPage = reqPage ? parseInt(reqPage, 10) : 1;
+    //         var pageIndex = (parsedPage > 0) ? (parsedPage - 1) : 0;
+
+    //         var headerPagedData = headerSearch.runPaged({ pageSize: limit });
+    //         var totalRecords = headerPagedData.count;
+    //         var totalPages = headerPagedData.pageRanges.length;
 
     //         var headerData = {};
     //         var headerIds = [];
+    //         var headerColMap = null;
+    //         var fetchedRecordsCount = 0;
 
-    //         headerResults.forEach(function (result) {
+    //         if (totalRecords === 0 || pageIndex >= totalPages) {
+    //             return generateResponse(200, "No data found", totalRecords, limit, pageIndex, totalPages, 0, headerData);
+    //         }
 
+    //         var page = headerPagedData.fetch({ index: pageIndex });
+    //         fetchedRecordsCount = page.data.length;
+
+    //         page.data.forEach(function (result) {
     //             var internalId = result.getValue({ name: "internalid" });
-
     //             headerIds.push(internalId);
 
     //             var recordData = {};
 
-    //             result.columns.forEach(function (column) {
+    //             if (!headerColMap) {
+    //                 headerColMap = result.columns.map(function (column) {
+    //                     return {
+    //                         col: column,
+    //                         snakeName: toSnakeCase(column.label || column.name)
+    //                     };
+    //                 });
+    //             }
 
-    //                 var columnName = toSnakeCase(column.label || column.name);
-
-    //                 recordData[columnName] =
-    //                     result.getText(column) || result.getValue(column);
-
-    //             });
+    //             for (var i = 0; i < headerColMap.length; i++) {
+    //                 var mapObj = headerColMap[i];
+    //                 recordData[mapObj.snakeName] = result.getText(mapObj.col) || result.getValue(mapObj.col);
+    //             }
 
     //             recordData.itemDetails = [];
-
+    //             recordData._addedKeys = {};
     //             headerData[internalId] = recordData;
-
     //         });
 
     //         /**
     //          * Item Search
     //          */
-
     //         var itemSearch = search.load({ id: 4798 });
+    //         itemSearch.filters.push(search.createFilter({
+    //             name: "internalid",
+    //             operator: search.Operator.ANYOF,
+    //             values: headerIds
+    //         }));
+    //         var itemIds = [];
+    //         var cartonsIds = {};
+    //         var itemColMap = null;
 
-    //         if (headerIds.length) {
+    //         var itemPagedData = itemSearch.runPaged({ pageSize: 1000 });
 
-    //             itemSearch.filters.push(search.createFilter({
-    //                 name: "internalid",
-    //                 operator: search.Operator.ANYOF,
-    //                 values: headerIds
-    //             }));
+    //         itemPagedData.pageRanges.forEach(function (pageRange) {
+    //             var itemPage = itemPagedData.fetch({ index: pageRange.index });
 
+    //             itemPage.data.forEach(function (result) {
+    //                 var internalId = result.getValue({ name: "internalid" });
+
+    //                 if (!headerData[internalId]) return;
+    //                 if (!cartonsIds[internalId]) cartonsIds[internalId] = 1;
+
+    //                 var baseItemData = {};
+    //                 var lineQuantityRaw = 0;
+    //                 var so_items_str = "";
+    //                 var unique_id_val = "";
+    //                 var item_internalid = result.getValue({ name: "item" });
+    //                 if (item_internalid && itemIds.indexOf(item_internalid) === -1) {
+    //                     itemIds.push(item_internalid);
+    //                 }
+    //                 if (!itemColMap) {
+    //                     itemColMap = result.columns.map(function (column) {
+    //                         return {
+    //                             col: column,
+    //                             snakeName: toSnakeCase(column.label || column.name)
+    //                         };
+    //                     });
+    //                 }
+
+    //                 for (var i = 0; i < itemColMap.length; i++) {
+    //                     var mapObj = itemColMap[i];
+    //                     var columnName = mapObj.snakeName;
+    //                     var valueText = result.getText(mapObj.col) || result.getValue(mapObj.col);
+
+    //                     if (columnName === "quantity") {
+    //                         lineQuantityRaw = parseFloat(valueText) || 0;
+    //                     }
+    //                     else if (columnName === "so_items") {
+    //                         so_items_str = valueText || "";
+    //                         var parsedSoItemsCount = 0;
+    //                         if (so_items_str) {
+    //                             var splitArr = so_items_str.split(";");
+    //                             for (var s = 0; s < splitArr.length; s++) {
+    //                                 if (splitArr[s].trim().length > 0) parsedSoItemsCount++;
+    //                             }
+    //                         }
+    //                         baseItemData["so_items"] = parsedSoItemsCount;
+    //                     }
+    //                     else if (columnName === "unique_id") {
+    //                         unique_id_val = valueText || "";
+    //                         baseItemData["unique_id"] = unique_id_val;
+    //                     }
+    //                     else if (columnName === "ship_via") {
+    //                         baseItemData["shipMethodText"] = result.getText(mapObj.col);
+    //                         baseItemData["shipMethodValue"] = result.getValue(mapObj.col);
+    //                     }
+    //                     else if (columnName === "item_types") {
+    //                         var typeValue = (valueText || "").toLowerCase().trim();
+    //                         if (typeValue === "rug") baseItemData["item_types"] = "Rug";
+    //                         else if (typeValue === "box" || typeValue === "small" || typeValue === "boxes") baseItemData["item_types"] = "Box";
+    //                         else if (typeValue === "oversize") baseItemData["item_types"] = "Oversize";
+    //                         else baseItemData["item_types"] = "";
+    //                     }
+    //                     else {
+    //                         baseItemData[columnName] = valueText;
+    //                     }
+    //                 }
+    //                 var primaryUnitsCache = itemPrimaryUnits_new(itemIds);
+    //                 /**
+    //                  * 🔥 CORRECT UNIT CONVERSION (LINE LEVEL)
+    //                  */
+    //                 var lineQty = parseFloat(lineQuantityRaw) || 0;
+
+    //                 var rate = 1;
+    //                 if (primaryUnitsCache && primaryUnitsCache[item_internalid]) {
+    //                     var itemObj = primaryUnitsCache[item_internalid];
+    //                     rate = parseInt(itemObj && itemObj.rate ? itemObj.rate : 1);
+    //                     if (!rate || isNaN(rate)) rate = 1;
+    //                 }
+
+    //                 var convertedLineQty = lineQty;
+    //                 if (rate > 0) {
+    //                     convertedLineQty = Math.floor(lineQty / rate);
+    //                 }
+
+    //                 /**
+    //                  * Bin transfer logic
+    //                  */
+    //                 var existBinArr = typeof getBinTransferinfo === 'function' ? getBinTransferinfo(result, primaryUnitsCache) : [];
+
+    //                 if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
+    //                     existBinArr = [{
+    //                         internalId: "", binId: "", binNumber: "", relatedSalesOrder: "",
+    //                         item: "", quantity: "", binIndex: ""
+    //                     }];
+    //                 }
+
+    //                 for (var b = 0; b < existBinArr.length; b++) {
+    //                     var binObj = existBinArr[b];
+    //                     // var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
+    //                     var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "") + "_" + (unique_id_val || "");
+    //                     if (headerData[internalId]._addedKeys[uniqueKey]) continue;
+
+    //                     headerData[internalId]._addedKeys[uniqueKey] = true;
+
+    //                     var itemData = {};
+    //                     for (var key in baseItemData) {
+    //                         if (baseItemData.hasOwnProperty(key)) {
+    //                             itemData[key] = baseItemData[key];
+    //                         }
+    //                     }
+
+    //                     var uniqueIdToSet = unique_id_val
+    //                         ? unique_id_val + "_" + (binObj.binIndex || (b + 1))
+    //                         : item_internalid + "_" + (binObj.binIndex || (b + 1));
+
+    //                     itemData["unique_id"] = uniqueIdToSet;
+
+    //                     /**
+    //                      * 🔥 DISTRIBUTE TO BIN (NO DOUBLE CONVERSION)
+    //                      */
+    //                     var binQty = (binObj.quantity !== null && binObj.quantity !== "")
+    //                         ? parseFloat(binObj.quantity)
+    //                         : lineQty;
+
+    //                     if (isNaN(binQty)) binQty = lineQty;
+
+    //                     var finalQty = convertedLineQty;
+
+    //                     if (lineQty > 0 && binQty > 0) {
+    //                         finalQty = Math.floor((binQty / lineQty) * convertedLineQty);
+    //                     }
+
+    //                     itemData["quantity"] = finalQty;
+    //                     itemData["item_quantity"] = convertedLineQty;
+    //                     itemData["quantity_remaining"] = finalQty;
+
+
+    //                     itemData["asin_type_TEST"] = (itemData["asin_type"] || "") + " -";
+
+    //                     itemData["bin_id"] = binObj.binId || "";
+    //                     itemData["bin_index"] = binObj.binIndex || "";
+    //                     itemData["bin_name"] = binObj.binNumber || "";
+    //                     itemData["bin_transfer_internalid"] = binObj.internalId || "";
+
+    //                     headerData[internalId].itemDetails.push(itemData);
+    //                 }
+    //             });
+    //         });
+
+    //         for (var id in headerData) {
+    //             if (headerData.hasOwnProperty(id)) {
+    //                 delete headerData[id]._addedKeys;
+    //             }
     //         }
 
-    //         var itemResults = itemSearch.run().getRange({
-    //             start: 0,
-    //             end: 1000
-    //         });
+    //         for (var id in headerData) {
+    //             if (headerData.hasOwnProperty(id)) {
 
-    //         var cartonsIds = {};
+    //                 var items = headerData[id].itemDetails;
+    //                 var total = items.length;
 
-    //         itemResults.forEach(function (result) {
-
-    //             var internalId = result.getValue({ name: "internalid" });
-
-    //             if (!headerData[internalId]) return;
-
-    //             if (!cartonsIds[internalId]) cartonsIds[internalId] = 1;
-
-    //             var baseItemData = {};
-
-    //             var lineQuantityRaw = 0;
-
-    //             var parsedSoItemsArr = [];
-
-    //             var so_items_str = "";
-
-    //             var item_internalid = result.getValue({ name: "item" });
-
-    //             var unique_id_val = "";
-
-    //             result.columns.forEach(function (column) {
-
-    //                 var columnName = toSnakeCase(column.label || column.name);
-
-    //                 var valueText = result.getText(column) || result.getValue(column);
-
-    //                 if (columnName === "quantity") {
-
-    //                     lineQuantityRaw = parseInt(valueText) || 0;
-
+    //                 for (var i = 0; i < total; i++) {
+    //                     items[i]["cartonInfo"] = [(i + 1) + " of " + total];
     //                 }
 
-    //                 if (columnName === "so_items") {
-
-    //                     so_items_str = valueText || "";
-
-    //                     if (so_items_str) {
-
-    //                         parsedSoItemsArr = so_items_str
-    //                             .split(";")
-    //                             .map(function (s) { return s.trim(); })
-    //                             .filter(function (s) { return s.length > 0; });
-
-    //                     }
-
-    //                     baseItemData["so_items"] = parsedSoItemsArr.length;
-
-    //                 }
-
-    //                 else if (columnName === "unique_id") {
-
-    //                     unique_id_val = valueText || "";
-
-    //                     baseItemData["unique_id"] = valueText || "";
-
-    //                 }
-
-    //                 else if (columnName === "ship_via") {
-
-    //                     baseItemData["shipMethodText"] = result.getText(column);
-
-    //                     baseItemData["shipMethodValue"] = result.getValue(column);
-
-    //                 }
-
-    //                 else if (columnName === "item_types") {
-
-    //                     var typeValue = (valueText || "").toLowerCase().trim();
-
-    //                     if (typeValue === "rug") {
-
-    //                         baseItemData["item_types"] = "Rug";
-
-    //                     } else if (
-    //                         typeValue === "box" ||
-    //                         typeValue === "small" ||
-    //                         typeValue === "boxes"
-    //                     ) {
-
-    //                         baseItemData["item_types"] = "Box";
-
-    //                     } else if (typeValue === "oversize") {
-
-    //                         baseItemData["item_types"] = "Oversize";
-
-    //                     } else {
-
-    //                         baseItemData["item_types"] = "";
-
-    //                     }
-
-    //                 }
-
-    //                 else {
-
-    //                     baseItemData[columnName] = valueText;
-
-    //                 }
-
-    //             });
-
-    //             /**
-    //              * Bin transfer logic
-    //              */
-
-    //             var existBinArr = getBinTransferinfo(result, itemPrimaryUnits());
-
-    //             if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
-
-    //                 existBinArr = [{
-    //                     internalId: "",
-    //                     binId: "",
-    //                     binNumber: "",
-    //                     relatedSalesOrder: "",
-    //                     item: "",
-    //                     quantity: "",
-    //                     binIndex: ""
-    //                 }];
-
+    //                 delete headerData[id]._addedKeys;
     //             }
+    //         }
 
-    //             if (!headerData[internalId]._addedKeys)
-    //                 headerData[internalId]._addedKeys = {};
+    //         return generateResponse(200, "Data retrieved successfully", totalRecords, limit, pageIndex, totalPages, fetchedRecordsCount, headerData);
 
-    //             for (var b = 0; b < existBinArr.length; b++) {
-
-    //                 var binObj = existBinArr[b];
-
-    //                 var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
-
-    //                 if (headerData[internalId]._addedKeys[uniqueKey]) continue;
-
-    //                 headerData[internalId]._addedKeys[uniqueKey] = true;
-
-    //                 var itemData = Object.assign({}, baseItemData);
-
-    //                 var uniqueIdToSet = unique_id_val
-    //                     ? unique_id_val + "_" + (binObj.binIndex || (b + 1))
-    //                     : item_internalid + "_" + (binObj.binIndex || (b + 1));
-
-    //                 itemData["unique_id"] = uniqueIdToSet;
-
-    //                 itemData["quantity"] = parseInt(binObj.quantity || lineQuantityRaw);
-
-    //                 itemData["bin_id"] = binObj.binId || "";
-
-    //                 itemData["bin_index"] = binObj.binIndex || "";
-
-    //                 itemData["bin_name"] = binObj.binNumber || "";
-
-    //                 itemData["bin_transfer_internalid"] = binObj.internalId || "";
-
-    //                 headerData[internalId].itemDetails.push(itemData);
-
-    //             }
-
-    //         });
-
-    //         /**
-    //          * Remove internal tracking key
-    //          */
-
-    //         Object.keys(headerData).forEach(function (id) {
-
-    //             delete headerData[id]._addedKeys;
-
-    //         });
-
-    //         return {
-
-    //             status: 200,
-
-    //             message: "Data retrieved successfully",
-
-    //             summary: {
-
-    //                 total_records: headerIds.length,
-
-    //                 records_per_page: pageSize,
-
-    //                 current_page: Math.floor(startIndex / pageSize) + 1
-
-    //             },
-
-    //             data: headerData
-
-    //         };
-
-    //     }
-
-    //     catch (e) {
-
+    //     } catch (e) {
     //         log.error("Error in getDropShipOrders", e);
-
-    //         return {
-
-    //             status: 500,
-
-    //             message: e.message
-
-    //         };
-
+    //         return { status: 500, message: e.message };
     //     }
-
     // }
-
-    // Changed the parameter from startIndex to pageNumber
     function getDropShipOrders_helperfunction(context, pageSize, startIndex) {
         try {
             var scriptObj = runtime.getCurrentScript();
@@ -6315,18 +6340,15 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                 headerSearch.filters = (headerSearch.filters || []).concat(filters);
             }
 
-            // 1. Setup Pagination Limits (Page Number Logic)
             var pSize = context.pageSize || context.page_size || pageSize;
             var reqPage = context.startIndex || context.page_number || startIndex;
-            log.error("Pagination Params", { pageSize: pSize, startIndex: reqPage });
-            var limit = pSize ? parseInt(pSize, 10) : 1000;
-            if (limit > 1000) limit = 1000; // NetSuite's max allowed page size
 
-            // Convert 1-based page number to NetSuite's 0-based page index
+            var limit = pSize ? parseInt(pSize, 10) : 1000;
+            if (limit > 1000) limit = 1000;
+
             var parsedPage = reqPage ? parseInt(reqPage, 10) : 1;
             var pageIndex = (parsedPage > 0) ? (parsedPage - 1) : 0;
 
-            // 2. Run Paged Search on Headers
             var headerPagedData = headerSearch.runPaged({ pageSize: limit });
             var totalRecords = headerPagedData.count;
             var totalPages = headerPagedData.pageRanges.length;
@@ -6336,12 +6358,10 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             var headerColMap = null;
             var fetchedRecordsCount = 0;
 
-            // If no records or requested page is out of bounds, return early
             if (totalRecords === 0 || pageIndex >= totalPages) {
                 return generateResponse(200, "No data found", totalRecords, limit, pageIndex, totalPages, 0, headerData);
             }
 
-            // 3. Fetch ONLY the specific page requested
             var page = headerPagedData.fetch({ index: pageIndex });
             fetchedRecordsCount = page.data.length;
 
@@ -6374,17 +6394,42 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
              * Item Search
              */
             var itemSearch = search.load({ id: 4798 });
-            itemSearch.filters.push(search.createFilter({
-                name: "internalid",
-                operator: search.Operator.ANYOF,
-                values: headerIds
-            }));
+            if (headerIds.length > 0) {
+                itemSearch.filters.push(search.createFilter({
+                    name: "internalid",
+                    operator: search.Operator.ANYOF,
+                    values: headerIds
+                }));
+            }
+            if(context.salesOrderItemId){
+                itemSearch.filters.push(search.createFilter({
+                    name: "item",
+                    operator: search.Operator.ANYOF,
+                    values: context.salesOrderItemId
+                }));
+            }
 
-            var primaryUnitsCache = typeof itemPrimaryUnits === 'function' ? itemPrimaryUnits() : null;
+            var itemIds = [];
             var cartonsIds = {};
             var itemColMap = null;
 
             var itemPagedData = itemSearch.runPaged({ pageSize: 1000 });
+
+            // 🔥 FIRST PASS: collect itemIds
+            itemPagedData.pageRanges.forEach(function (pageRange) {
+                var itemPage = itemPagedData.fetch({ index: pageRange.index });
+
+                itemPage.data.forEach(function (result) {
+                    var item_internalid = result.getValue({ name: "item" });
+                    if (item_internalid && itemIds.indexOf(item_internalid) === -1) {
+                        itemIds.push(item_internalid);
+                    }
+                });
+            });
+
+            // 🔥 LOAD ONCE
+            var conversionMap = getUOMMapByUnitType_new();
+            var primaryUnitsCache = itemPrimaryUnits_new(itemIds);
 
             itemPagedData.pageRanges.forEach(function (pageRange) {
                 var itemPage = itemPagedData.fetch({ index: pageRange.index });
@@ -6416,7 +6461,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                         var valueText = result.getText(mapObj.col) || result.getValue(mapObj.col);
 
                         if (columnName === "quantity") {
-                            lineQuantityRaw = parseInt(valueText, 10) || 0;
+                            lineQuantityRaw = parseFloat(valueText) || 0;
                         }
                         else if (columnName === "so_items") {
                             so_items_str = valueText || "";
@@ -6439,25 +6484,39 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                         }
                         else if (columnName === "item_types") {
                             var typeValue = (valueText || "").toLowerCase().trim();
-                            if (typeValue === "rug") {
-                                baseItemData["item_types"] = "Rug";
-                            } else if (typeValue === "box" || typeValue === "small" || typeValue === "boxes") {
-                                baseItemData["item_types"] = "Box";
-                            } else if (typeValue === "oversize") {
-                                baseItemData["item_types"] = "Oversize";
-                            } else {
-                                baseItemData["item_types"] = "";
-                            }
+                            if (typeValue === "rug") baseItemData["item_types"] = "Rug";
+                            else if (typeValue === "box" || typeValue === "small" || typeValue === "boxes") baseItemData["item_types"] = "Box";
+                            else if (typeValue === "oversize") baseItemData["item_types"] = "Oversize";
+                            else baseItemData["item_types"] = "";
                         }
                         else {
                             baseItemData[columnName] = valueText;
                         }
                     }
 
-                    /**
-                     * Bin transfer logic
-                     */
-                    var existBinArr = typeof getBinTransferinfo === 'function' ? getBinTransferinfo(result, primaryUnitsCache) : [];
+                    var lineQty = parseFloat(lineQuantityRaw) || 0;
+
+                    // 🔥 STEP 3 (FIXED)
+                    var rate = 1;
+                    var unitText = (baseItemData["units"] || "").toLowerCase().trim();
+
+                    if (unitText && conversionMap[unitText]) {
+                        rate = conversionMap[unitText].rate;
+                    }
+                    else if (primaryUnitsCache && primaryUnitsCache[item_internalid]) {
+                        rate = primaryUnitsCache[item_internalid].rate;
+                    }
+
+                    if (!rate || isNaN(rate)) rate = 1;
+
+                    var convertedLineQty = lineQty;
+                    if (rate > 0) {
+                        convertedLineQty = Math.floor(lineQty / rate);
+                    }
+
+                    var existBinArr = typeof getBinTransferinfo === 'function'
+                        ? getBinTransferinfo(result, primaryUnitsCache)
+                        : [];
 
                     if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
                         existBinArr = [{
@@ -6468,8 +6527,8 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
 
                     for (var b = 0; b < existBinArr.length; b++) {
                         var binObj = existBinArr[b];
-                        var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
 
+                        var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "") + "_" + (unique_id_val || "");
                         if (headerData[internalId]._addedKeys[uniqueKey]) continue;
 
                         headerData[internalId]._addedKeys[uniqueKey] = true;
@@ -6487,10 +6546,22 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
 
                         itemData["unique_id"] = uniqueIdToSet;
 
-                        itemData["quantity"] = parseInt(binObj.quantity || lineQuantityRaw, 10);
-                        itemData["item_quantity"] = itemData["quantity"];
+                        var binQty = (binObj.quantity !== null && binObj.quantity !== "")
+                            ? parseFloat(binObj.quantity)
+                            : lineQty;
 
-                        itemData["cartonInfo"] = ["1 of 1"];
+                        if (isNaN(binQty)) binQty = lineQty;
+
+                        var finalQty = convertedLineQty;
+
+                        if (lineQty > 0 && binQty > 0) {
+                            finalQty = Math.round((binQty / lineQty) * convertedLineQty);
+                        }
+
+                        itemData["quantity"] = finalQty;
+                        itemData["item_quantity"] = convertedLineQty;
+                        itemData["quantity_remaining"] = finalQty;
+
                         itemData["asin_type_TEST"] = (itemData["asin_type"] || "") + " -";
 
                         itemData["bin_id"] = binObj.binId || "";
@@ -6509,6 +6580,17 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
                 }
             }
 
+            for (var id in headerData) {
+                if (headerData.hasOwnProperty(id)) {
+                    var items = headerData[id].itemDetails;
+                    var total = items.length;
+
+                    for (var i = 0; i < total; i++) {
+                        items[i]["cartonInfo"] = [(i + 1) + " of " + total];
+                    }
+                }
+            }
+
             return generateResponse(200, "Data retrieved successfully", totalRecords, limit, pageIndex, totalPages, fetchedRecordsCount, headerData);
 
         } catch (e) {
@@ -6516,7 +6598,6 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             return { status: 500, message: e.message };
         }
     }
-
     // Helper function that calculates boundaries perfectly based on pageIndex
     function generateResponse(status, message, totalRecords, pageSize, pageIndex, totalPages, dataCount, data) {
         // Ex: Page 2 (index 1) * 1000 = 1000.
@@ -6544,7 +6625,110 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
         };
     }
 
+    function getUOMMapByUnitType_new() {
+        var uomMap = {};
 
+        try {
+            var uomSearch = search.create({
+                type: 'unitstype',
+                filters: [],
+                columns: [
+                    search.createColumn({ name: 'unitname' }),
+                    search.createColumn({ name: 'conversionrate' })
+                ]
+            });
+
+            uomSearch.run().each(function (res) {
+                var unit = (res.getValue({ name: 'unitname' }) || "")
+                    .toLowerCase()
+                    .trim();
+
+                var rate = parseFloat(res.getValue({ name: 'conversionrate' })) || 1;
+
+                // store normalized
+                uomMap[unit] = {
+                    unit: unit,
+                    rate: rate
+                };
+
+                return true;
+            });
+
+        } catch (e) {
+            log.error('Error in getUOMMapByUnitType_new', e);
+        }
+
+        return uomMap;
+    }
+
+    function itemPrimaryUnits_new(itemIds) {
+        try {
+            var itemDataStockUnit = {};
+
+            if (!itemIds || itemIds.length === 0) {
+                return {};
+            }
+
+            var conversionMap = getUOMMapByUnitType_new();
+
+            var itemSearch = search.create({
+                type: search.Type.ITEM,
+                filters: [
+                    ["type", "anyof", "InvtPart"],
+                    "AND",
+                    ["internalid", "anyof", itemIds]
+                ],
+                columns: [
+                    'internalid',
+                    'stockunit'
+                ]
+            });
+
+            var itemResultSet = itemSearch.run();
+            var start = 0;
+            var pageSize = 1000;
+
+            do {
+                var itemResults = itemResultSet.getRange({
+                    start: start,
+                    end: start + pageSize
+                });
+
+                if (!itemResults || itemResults.length === 0) break;
+
+                for (var i = 0; i < itemResults.length; i++) {
+
+                    var itemId = itemResults[i].getValue('internalid');
+
+                    var stockUnit = (itemResults[i].getText('stockunit') || "")
+                        .toLowerCase()
+                        .trim();
+
+                    var rateObj = conversionMap[stockUnit];
+
+                    if (!rateObj || !rateObj.rate) {
+                        log.error("Missing UOM mapping", {
+                            item: itemId,
+                            stockUnit: stockUnit
+                        });
+
+                        rateObj = { rate: 1 };
+                    }
+
+                    itemDataStockUnit[itemId] = rateObj;
+                }
+
+                start += pageSize;
+
+            } while (true);
+
+            return itemDataStockUnit;
+
+        } catch (e) {
+            log.error("Error in itemPrimaryUnits_new", e.message);
+            return {};
+        }
+    }
 
 
     return {

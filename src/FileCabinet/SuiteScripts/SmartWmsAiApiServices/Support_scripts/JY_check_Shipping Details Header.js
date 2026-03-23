@@ -7,7 +7,7 @@ define(['N/search', 'N/record'], function (search, record) {
     function afterSubmit(context) {
         try {
             // Only proceed for Create or Edit events
-            if(context.type !== context.UserEventType.CREATE) {
+            if (context.type !== context.UserEventType.CREATE) {
                 return;
             }
             var newRecord = context.newRecord;
@@ -31,23 +31,38 @@ define(['N/search', 'N/record'], function (search, record) {
                             isDynamic: true
                         });
                         var soLinesCount = soload.getLineCount({ sublistId: 'recmachcustrecord_ship_detail_hdr_link' });
+                        var partsitem = false;
                         for (var i = soLinesCount - 1; i >= 0; i--) {
-                            soload.removeLine({
+                            var itemId = soload.getSublistValue({
                                 sublistId: 'recmachcustrecord_ship_detail_hdr_link',
-                                line: i,
-                                ignoreRecalc: true
+                                fieldId: 'custrecord_shipping_record_item',
+                                line: i
                             });
+                            if (itemId !== 57740) {
+                                log.audit({ title: 'Removing Line', details: 'Removing line with Item ID: ' + itemId + ' from record ID: ' + recordId });
+                                soload.removeLine({
+                                    sublistId: 'recmachcustrecord_ship_detail_hdr_link',
+                                    line: i,
+                                    ignoreRecalc: true
+                                });
+                            } else if (itemId == 57740) {
+                                partsitem = true;
+                            }
+
                         }
-                        soload.setValue({
-                            fieldId: 'isinactive',
-                            value: true
-                        });
-                        soload.save({
+                        if (!partsitem) {
+                            soload.setValue({
+                                fieldId: 'isinactive',
+                                value: true
+                            });
+                                                  soload.save({
                             enableSourcing: true,
                             ignoreMandatoryFields: true
                         });
                         log.audit({ title: 'WMS Enabled - Cleared Lines', details: 'Cleared lines for record ID: ' + recordId });
-                    }
+                    
+                        }
+}
                 }
 
             }

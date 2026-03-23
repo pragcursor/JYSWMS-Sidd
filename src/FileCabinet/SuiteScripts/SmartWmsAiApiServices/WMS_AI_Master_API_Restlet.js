@@ -47,6 +47,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             var startIndex = (pageNumber - 1) * pageSize;
 
             switch (action) {
+                case 'get_oldBinTransfers':
+                    return getOldBinTransfers(context);
+                case 'get_oldUnpickedOrders':
+                    return getOldUnpickedOrders(context);
                 case 'get_unSyncedOrders':
                     return getUnSyncedOrders(context);
 
@@ -71,7 +75,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'getOrdersDUP':
                     return orderUtils.getDropShipOrders_helperfunction(context, pageSize, startIndex);  //getDropShipOrders_helperfunction
                 case 'getTestFunction':
-                    return orderUtils.getDropShipOrders_checkinDB(context, pageSize, startIndex);
+                    return orderUtils.getDropShipOrders(context, pageSize, startIndex);
                 case 'get_UnpickedOrders':
                     return orderUtils.getUnpicked(context, pageSize, startIndex);
                 case 'getItemSalesPerCustomer':
@@ -138,34 +142,34 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-    // get unsynced orders
-    /**
-     * Get unsynced orders
-     * @param {Object} context - The context object
-     * @returns {Object} - The response object
-     */
-    function getUnSyncedOrders(context) {
+    function getOldBinTransfers(context) {
         try {
-            var unsyncedOrders = [];
-            const salesorderSearchObj = search.create({
-                type: "salesorder",
+            var oldBinTransfers = [];
+            const binTransferSearchObj = search.create({
+                type: "bintransfer",
                 filters:
                     [
-                        ["type", "anyof", "SalesOrd"],
+                        ["type", "anyof", "BinTrnfr"],
                         "AND",
-                        ["mainline", "is", "F"],
+                        ["custbodybulk_picking_processed", "is", "F"],
                         "AND",
-                        ["custbody_jys_enabled_customer", "is", "T"],
+                        ["mainline", "is", "T"],
                         "AND",
-                        ["custcol_jyswms_picked_qty", "isempty", ""],
+                        ["location", "anyof", "15", "9"],
                         "AND",
-                        ["status", "anyof", "SalesOrd:B"],
+                        ["custbody_wms_bulk_picking_processed", "is", "F"],
                         "AND",
-                        ["shipmethod", "noneof", "57733"],
+                        ["custbody_wms_mobile_trans_created_by", "anyof", "@NONE@"],
                         "AND",
-                        ["taxline", "is", "F"],
+                        ["custbody_realted_sales_order.status", "noneof", "SalesOrd:C", "SalesOrd:G", "SalesOrd:H"],
                         "AND",
-                        ["shipping", "is", "F"]
+                        ["custbody_realted_sales_order.mainline", "is", "T"],
+                        "AND",
+                        ["custbody_do_not_batch_bt", "is", "F"],
+                        "AND",
+                        ["custbody_realted_sales_order.custbody_wms_donotpick_so", "is", "F"],
+                        "AND",
+                        ["custbody_realted_sales_order.custbody_bulk_picking_rec", "anyof", "@NONE@"]
                     ],
                 columns:
                     [
@@ -176,6 +180,125 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         })
                     ]
             });
+            const searchResultCount = binTransferSearchObj.runPaged().count;
+            log.error("binTransferSearchObj result count", searchResultCount);
+            binTransferSearchObj.run().each(function (result) {
+                oldBinTransfers.push(result.getValue({
+                    name: "internalid",
+                    summary: "GROUP",
+                }));
+                return true;
+            });
+
+            return {
+                status: 200,
+                message: "Old Bin Transfers retrieved successfully",
+                data: oldBinTransfers
+            };
+        } catch (e) {
+            log.error("Error in getOldBinTransfers function", e);
+            return false;
+        }
+    }
+
+    // get old bin transfers
+    /**
+     * Get old bin transfers
+     * @param {Object} context - The context object
+     * @returns {Object} - The response object
+     */
+    // get old unpicked orders
+    function getOldUnpickedOrders(context) {
+        try {
+            var oldUnpickedOrders = [];
+            const salesorderSearchObj = search.create({
+                type: "salesorder",
+                filters:
+                    [
+                        ["type", "anyof", "SalesOrd"],
+                        "AND",
+                        ["mainline", "is", "T"],
+                        "AND",
+                        ["custbody_jys_enabled_customer", "is", "F"],
+                        "AND",
+                        ["status", "anyof", "SalesOrd:A", "SalesOrd:B"],
+                        "AND",
+                        ["custbody_bulk_picking_rec", "anyof", "@NONE@"]
+                    ],
+                columns:
+                    [
+                        search.createColumn({
+                            name: "internalid",
+                            summary: "GROUP",
+                            label: "Internal ID"
+                        })
+                    ]
+            });
+            const searchResultCount = salesorderSearchObj.runPaged().count;
+            log.debug("salesorderSearchObj result count", searchResultCount);
+            salesorderSearchObj.run().each(function (result) {
+                oldUnpickedOrders.push(result.getValue({
+                    name: "internalid",
+                    summary: "GROUP",
+                }));
+                // .run().each has a limit of 4,000 results
+                return true;
+            });
+
+            return {
+                status: 200,
+                message: "Old Unpicked Orders retrieved successfully",
+                data: oldUnpickedOrders
+            };
+        } catch (e) {
+            log.error("Error in getOldUnpickedOrders function", e);
+            return {
+                status: 500,
+                message: e.message
+            };
+        }
+    }
+
+    // get unsynced orders
+    /**
+     * Get unsynced orders
+     * @param {Object} context - The context object
+     * @returns {Object} - The response object
+     */
+    function getUnSyncedOrders(context) {
+        try {
+            var unsyncedOrders = [];
+            /*    const salesorderSearchObj = search.create({
+                    type: "salesorder",
+                    filters:
+                        [
+                            ["type", "anyof", "SalesOrd"],
+                            "AND",
+                            ["mainline", "is", "F"],
+                            "AND",
+                            ["custbody_jys_enabled_customer", "is", "T"],
+                            "AND",
+                            ["custcol_jyswms_picked_qty", "isempty", ""],
+                            "AND",
+                            ["status", "anyof", "SalesOrd:B"],
+                            "AND",
+                            ["shipmethod", "noneof", "57733"],
+                            "AND",
+                            ["taxline", "is", "F"],
+                            "AND",
+                            ["shipping", "is", "F"]
+                        ],
+                    columns:
+                        [
+                            search.createColumn({
+                                name: "internalid",
+                                summary: "GROUP",
+                                label: "Internal ID"
+                            })
+                        ]
+                });*/
+
+            var salesorderSearchObj = search.load({ id: 5036 });
             const searchResultCount = salesorderSearchObj.runPaged().count;
             log.debug("salesorderSearchObj result count", searchResultCount);
             salesorderSearchObj.run().each(function (result) {
@@ -4896,9 +5019,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 results.push({
                     internal_id: result.getValue({ name: 'internalid' }),
                     status: result.getText({ name: 'statusref' }),
-                    priority: result.getValue({ name: 'custbody_opt_ship_priority' }),
+                    priority: result.getValue({
+         name: "formulanumeric",
+         formula: "CASE     WHEN {custbody_pick_now_urgent} = 'T' THEN 1    ELSE {custbody_opt_ship_priority}END",
+         label: "priority"
+      }),
                     location: result.getText({ name: 'location' }),
-                    vridNumber: result.getText({ name: 'custbody_jyswms_vrid_number' })
+                    vridNumber: result.getText({ name: 'custbody_jyswms_vrid_number' }),
+                    pickupDate : result.getValue({name:'custbody_scheduled_pickup_date'})
                 });
             });
 

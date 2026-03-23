@@ -134,7 +134,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
             var batches = chunkArray(allItems, 500);
 
-            log.audit("Total Batches", batches.length);
+          //  log.audit("Total Batches", batches.length);
             var totalCount = 1
             var allResults = [];
             var response = {
@@ -159,10 +159,10 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
             batches.forEach(function (batch, index) {
 
 
-                log.audit("Processing b", {
-                    "index": index,
-                    "batch": batch
-                });
+                // log.audit("Processing b", {
+                //     "index": index,
+                //     "batch": batch
+                // });
 
                 var context = {
                     itemIds: batch
@@ -170,7 +170,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
                 var inventoryData = getInventoryTemp(context);
 
-                log.audit("Processing Batch Data", inventoryData);
+              //  log.audit("Processing Batch Data", inventoryData);
                 //var inventoryData = inventoryData.data;
                 var apiStatus = sendData(inventoryData);
 
@@ -706,7 +706,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 }
             }
 
-            log.audit("Total unique items", uniqueItems.length);
+          //  log.audit("Total unique items", uniqueItems.length);
 
             // =====================================================
             // 🚀 SMALL PAYLOAD → DIRECT PROCESSING

@@ -390,16 +390,28 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
             try {
 
                 if (binId) {
-                    var lookup = search.lookupFields({
-                        type: 'bin',
-                        id: binId,
-                        columns: ['isinactive']
+                    var isInactive = false;
+
+                    var binSearchObj = search.create({
+                        type: "bin",
+                        filters: [
+                            ["internalid", "is", binId],
+                            "AND",
+                            ["inactive", "is", "T"]
+                        ],
+                        columns: [
+                            search.createColumn({ name: "inactive" })
+                        ]
                     });
 
-                    var isInactive = lookup.isinactive; // boolean true/false
+                    var searchResult = binSearchObj.run().getRange({ start: 0, end: 1 });
 
-                    // If bin is inactive, make it active
-                    if (isInactive === true) {
+                    if (searchResult && searchResult.length > 0) {
+                        isInactive = searchResult[0].getValue({ name: "inactive" }) === 'T';
+                    }
+
+                    // IMPORTANT: check against 'T', not true
+                    if (isInactive) {
                         record.submitFields({
                             type: 'bin',
                             id: binId,
@@ -411,7 +423,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                 }
             } catch (e) {
 
-                log.error("Error in bin lookup or update", e.message);
+                log.error("Error in bin lookup or update", e);
             }
 
 
@@ -813,16 +825,28 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                 }
 
                 if (binId) {
-                    var lookup = search.lookupFields({
-                        type: 'bin',
-                        id: binId,
-                        columns: ['isinactive']
+                    var isInactive = false;
+
+                    var binSearchObj = search.create({
+                        type: "bin",
+                        filters: [
+                            ["internalid", "is", binId],
+                            "AND",
+                            ["inactive", "is", "T"]
+                        ],
+                        columns: [
+                            search.createColumn({ name: "inactive" })
+                        ]
                     });
 
-                    var isInactive = lookup.isinactive; // boolean true/false
+                    var searchResult = binSearchObj.run().getRange({ start: 0, end: 1 });
 
-                    // If bin is inactive, make it active
-                    if (isInactive === true) {
+                    if (searchResult && searchResult.length > 0) {
+                        isInactive = searchResult[0].getValue({ name: "inactive" }) === 'T';
+                    }
+
+                    // IMPORTANT: check against 'T', not true
+                    if (isInactive) {
                         record.submitFields({
                             type: 'bin',
                             id: binId,
@@ -1208,7 +1232,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
                     }
                     // Don't push success result
                 } catch (itemErr) {
-                     log.error('Error processing item', itemErr.message);
+                    log.error('Error processing item', itemErr.message);
                     results.push({
                         itemId: item,
                         success: false,
@@ -1292,7 +1316,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
 
 
         } catch (e) {
-             log.error('Bin Transfer Failed (outer)', e.message);
+            log.error('Bin Transfer Failed (outer)', e.message);
 
             if (customRecId) {
                 record.submitFields({
@@ -1380,7 +1404,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search,
             return existingBulkBinQuantitiesMap;
 
         } catch (e) {
-             log.error("Error in binSearch", e.toString());
+            log.error("Error in binSearch", e.toString());
             return {};
         }
     }

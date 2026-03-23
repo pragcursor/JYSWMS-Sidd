@@ -33,7 +33,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
 
             var customerId = newRec.getValue('custrecord_jyswms_customer_frm_so');
-           // log.error("customerId", customerId);
+            log.error("customerId", customerId);
            
             // if (!ltlCustomer || (customerId !== '1807' && customerId !== '476')) {
             //     log.error("not an amazon order", customerId);
@@ -71,7 +71,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
 
             // CASE 1: P/U Orders
-            if (shipVia === '57733') {
+            if (shipVia == '57733') {
 
                 // if (!ltlCustomer) {
                 //     log.debug("Skipping - P/U order but LTL checkbox not checked", customerId);
@@ -83,7 +83,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
 
             // CASE 2: Non P/U Orders
-            if (shipVia !== '57733' && !allowedCustomers.includes(customerId)) {
+            if (shipVia != '57733' && !allowedCustomers.includes(customerId)) {
                 log.debug("Skipping - Non P/U order and customer not allowed", customerId);
                 return;
             }

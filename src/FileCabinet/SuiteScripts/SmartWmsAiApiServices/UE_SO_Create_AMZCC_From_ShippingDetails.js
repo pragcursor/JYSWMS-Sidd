@@ -192,8 +192,9 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             fieldId: 'status'
         });
 
-        var status_restricte = ['Closed', 'Cancelled', 'Billed'];
-        if (status_restricte.includes(sostatus)) {
+       var restrictedStatuses = ['closed', 'cancelled', 'billed'];
+
+        if (restrictedStatuses.includes(sostatus.toLowerCase())) {
             rec.setValue({
                 fieldId: 'custbody_jyswms_fufilment_error',
                 value: ''

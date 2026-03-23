@@ -8,8 +8,8 @@ define([
     'N/log',
     'N/runtime',
     'N/https',
-    './Orders/orderUtils.js',
-    './JYSWMS_generateToken_API.js'
+    './Orders/orderUtils',
+    './JYSWMS_generateToken_API'
 ], (record, search, log, runtime, https, autoLocUtil, tokenModule) => {
 
     const LOC_HARDEE = '15';
@@ -28,11 +28,12 @@ define([
     // =========================================================
     const sendData = (payload) => {
 
-        // log.audit('SEND DATA - START', JSON.stringify(payload));
+        log.error('SEND DATA - START', JSON.stringify(payload));
 
         const token = tokenModule.generateToken();
+        log.error('SEND DATA - Token Generated', token ? 'Success' : 'Failed');
         if (!token) {
-           // log.error('SEND DATA - Token Failed', 'Token generation failed');
+            log.error('SEND DATA - Token Failed', 'Token generation failed');
             return;
         }
 
@@ -46,10 +47,10 @@ define([
                 body: JSON.stringify(payload)
             });
 
-            // log.audit('SEND DATA - RESPONSE', {
-            //     code: response.code,
-            //     body: response.body
-            // });
+            log.error('SEND DATA - RESPONSE', {
+                code: response.code,
+                body: response.body
+            });
 
             return {
                 success: response.code === 200,
@@ -67,13 +68,13 @@ define([
     // =========================================================
     const afterSubmit = (context) => {
 
-        // log.audit('AFTER SUBMIT - START', {
+        // log.error('AFTER SUBMIT - START', {
         //     type: context.type,
         //     recordId: context.newRecord.id
         // });
 
         if (![context.UserEventType.EDIT].includes(context.type)) {
-            // log.audit('EXIT', 'Not CREATE or EDIT'); ![context.UserEventType.CREATE,
+            // log.error('EXIT', 'Not CREATE or EDIT'); ![context.UserEventType.CREATE,
             return;
         }
 
@@ -86,7 +87,7 @@ define([
             //     return;
             // }
             if (soType !== record.Type.SALES_ORDER) {
-                log.audit('EXIT', 'Not Sales Order');
+                log.error('EXIT', 'Not Sales Order');
                 return;
             }
 
@@ -97,18 +98,18 @@ define([
             //  log.debug('HEADER CHECK', { autoLocEnabled, alreadyUpdated, status });
 
             if (['Closed', 'Cancelled', 'Billed'].includes(status)) {
-                // log.audit('EXIT', 'Invalid status');
+                // log.error('EXIT', 'Invalid status');
                 return;
             }
 
             if (!autoLocEnabled || alreadyUpdated) {
-                //log.audit('EXIT', 'Auto loc disabled or already updated');
+                //log.error('EXIT', 'Auto loc disabled or already updated');
                 return;
             }
 
             const customerId = newRec.getValue({ fieldId: 'entity' });
             if (!customerId) {
-                //  log.audit('EXIT', 'No customer');
+                //  log.error('EXIT', 'No customer');
                 return;
             }
 
@@ -129,7 +130,7 @@ define([
             // log.debug('CUSTOMER FLAGS', { isJysEnabled, isSingleIFCustomer });
 
             if (!isJysEnabled) {
-                // log.audit('EXIT', 'Customer not enabled');
+                // log.error('EXIT', 'Customer not enabled');
                 return;
             }
 
@@ -146,7 +147,7 @@ define([
             if (!lineCount) return;
 
             // if (isSingleIFCustomer && lineCount > 1) {
-            //   //  log.audit('EXIT', 'Single IF customer with multiple lines');
+            //   //  log.error('EXIT', 'Single IF customer with multiple lines');
             //     return;
             // }
 
@@ -201,14 +202,14 @@ define([
             //log.debug('ITEM SET', Array.from(itemSet));
 
             if (!itemSet.size) {
-                // log.audit('No items require evaluation');
+                // log.error('No items require evaluation');
                 markComplete(soType, soId);
                 return;
             }
 
             const inventoryMap = {};
 
-            // log.audit('INVENTORY SEARCH START', Array.from(itemSet));
+            // log.error('INVENTORY SEARCH START', Array.from(itemSet));
 
             search.create({
                 type: 'inventorybalance',
@@ -242,7 +243,7 @@ define([
                 return true;
             });
 
-            //  log.audit('INVENTORY MAP BUILT', JSON.stringify(inventoryMap));
+            //  log.error('INVENTORY MAP BUILT', JSON.stringify(inventoryMap));
 
             let anyLineUpdated = false;
             let newHeaderLocation = null;
@@ -311,7 +312,7 @@ define([
 
                 if (alternateAvailable >= qtyRequired) {
 
-                    log.audit('LOCATION SWITCH for SOID: ' + soId, {
+                    log.error('LOCATION SWITCH for SOID: ' + soId, {
                         line: i,
                         itemId,
                         from: currentLoc,
@@ -359,7 +360,7 @@ define([
                     value: true
                 });
 
-                log.audit('SAVING SO for SOID: ' + soId, soId);
+                log.error('SAVING SO for SOID: ' + soId, soId);
 
                 so.save({
                     enableSourcing: false,
@@ -367,7 +368,7 @@ define([
                 });
 
             } else {
-                //  log.audit('No lines updated for SOID: ' + soId, soId);
+                //  log.error('No lines updated for SOID: ' + soId, soId);
                 markComplete(soType, soId);
             }
 
@@ -378,22 +379,36 @@ define([
                     salesOrderItemId: Array.from(updatedItemIds)
                 };
 
-                //  log.audit('CALLING DUP API for SOID: ' + soId, payload);
+                log.error('CALLING DUP API for SOID: ' + soId, payload);
 
-                const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload);
+                // const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload);
+                // log.error('DUP API RESPONSE for SOID: ' + soId, responseJson);
+                // if (responseJson && responseJson.data && Object.keys(responseJson.data).length > 0) {
+                //     sendData(responseJson.data);
+                // }    function getDropShipOrders(context, pageSize, startIndex) {
 
-                if (responseJson && responseJson.length > 0) {
+                const responseJson = autoLocUtil.getDropShipOrders(payload,1000,0);  //_helperfunction
+                log.error('DUP API RESPONSE for SOID: ' + soId, responseJson);
+
+                if (
+                    responseJson &&
+                    responseJson.data &&
+                    Object.keys(responseJson.data).length > 0
+                ) {
+                    log.error('VALID DATA FOUND - CALLING API', responseJson.data);
                     sendData(responseJson);
+                } else {
+                    log.error('NO VALID DATA - SKIPPING API', responseJson);
                 }
             }
 
         } catch (error) {
-            log.error('AFTER SUBMIT ERROR for SOID: ' +  error);
+            log.error('AFTER SUBMIT ERROR for SOID: ' + error);
         }
     };
 
     const markComplete = (type, id) => {
-        //  log.audit('MARK COMPLETE for SOID: ' + id, id);
+        //  log.error('MARK COMPLETE for SOID: ' + id, id);
 
         record.submitFields({
             type: type,
@@ -417,8 +432,21 @@ define([
             const isEnabled = soRec.getValue('custbody_jys_enabled_customer');
             if (!isEnabled) return;
 
+            const shipvia = soRec.getValue('shipmethod');
+            if (shipvia == 57733) {
+                log.error('EXIT', 'Order is marked as P/U, skipping auto location change and closed line sync');
+                return;
+            }
+
+            const excludeCustomer = soRec.getText('entity');
+            if (excludeCustomer && excludeCustomer.toLowerCase().includes('amazon')) {
+                log.error('EXIT', 'Customer is Amazon, skipping auto location change and closed line sync');
+                return;
+            }
+
             const status = soRec.getValue('status');
-            if (['Closed', 'Cancelled', 'Billed'].includes(status)) {
+            var lowerStatus = status ? String(status).toLowerCase() : '';
+            if (['closed', 'cancelled', 'billed'].includes(lowerStatus)) {
                 soRec.setValue({
                     fieldId: 'custbody_jyswms_fufilment_error',
                     value: ''
@@ -428,7 +456,7 @@ define([
             const lineCount = soRec.getLineCount({ sublistId: 'item' });
             if (!lineCount) return;
 
-            const CLOSED_SYNC_START_DATE = new Date(2025, 0, 1);
+            const CLOSED_SYNC_START_DATE = new Date(2026, 0, 1);
             // Month is 0-indexed → 0 = January
 
             const closedItemIds = new Set(); // Track items that are closed
@@ -485,17 +513,26 @@ define([
                     line: i
                 });
 
-                // if (isClosed === true || isClosed === 'T' && !closed_sent) {
-                //     soRec.setSublistValue({
-                //         sublistId: 'item',
-                //         fieldId: 'custcol_jys_close_sent',
-                //         line: i,
-                //         value: true
-                //     });
-                //     if (itemId) {
-                //         closedItemIds.add(String(itemId));
-                //     }
-                // }
+                if (isClosed === true || isClosed === 'T' && !closed_sent) {
+                    if (pickedRaw > 0) {
+                        soRec.setSublistValue({
+                            sublistId: 'item',
+                            fieldId: 'custcol_jys_close_sent',
+                            line: i,
+                            value: true
+                        });
+                        soRec.setSublistValue({
+                            sublistId: 'item',
+                            fieldId: 'isclosed',
+                            line: i,
+                            value: true
+                        });
+                    }
+
+                    if (itemId && (pickedRaw == null || pickedRaw == '' || pickedRaw == undefined || pickedRaw == 0)) {
+                        closedItemIds.add(String(itemId));
+                    }
+                }
             }
 
             // =========================================================
@@ -512,18 +549,18 @@ define([
                     // });
 
                 } else if (tranDate && new Date(tranDate) > CLOSED_SYNC_START_DATE) {
-                    //  log.audit('CLOSED ITEMS FOUND for SOID: ' + soRec.id, Array.from(closedItemIds));
+                    //  log.error('CLOSED ITEMS FOUND for SOID: ' + soRec.id, Array.from(closedItemIds));
                     const payload = {
                         salesOrderHeaderId: soRec.id,
                         salesOrderItemId: Array.from(closedItemIds)
                     };
 
-                  //  log.error('CLOSED ITEMS DETECTED', payload);
+                    //  log.error('CLOSED ITEMS DETECTED', payload);
 
                     const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload);
 
                     if (responseJson && responseJson.length > 0) {
-                        // sendClosedData(responseJson);
+                        //  sendClosedData(responseJson);
                     }
                 }
             }
@@ -709,7 +746,7 @@ define([
 
         const token = tokenModule.generateToken();
         if (!token) {
-          //  log.error('SEND CLOSED DATA - Token Failed', 'Token generation failed');
+            //  log.error('SEND CLOSED DATA - Token Failed', 'Token generation failed');
             return;
         }
 

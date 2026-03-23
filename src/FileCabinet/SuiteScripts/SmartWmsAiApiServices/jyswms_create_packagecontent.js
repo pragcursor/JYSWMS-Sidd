@@ -59,9 +59,9 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
                 //salesOrderId = "62919500";
             }
-            if (!isApproved) {
-                return;
-            }
+            // if (!isApproved) {
+            //     return;
+            // }
 
             if (!carrierProNumber && shipVia == '57733') {
 
