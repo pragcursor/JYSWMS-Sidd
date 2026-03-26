@@ -2,813 +2,372 @@
  * @NApiVersion 2.x
  * @NModuleScope Public
  */
-define(['N/record', 'N/search', 'N/log', 'N/runtime'], function (record, search, log, runtime) {
 
-    function markAfullFillPartsOrsersPicked(requestBody, jyswmsApiCustRecId) {
-        var headerId = null;
+define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
+
+    function markAfullFillPartsOrsersPicked(requestBody) {
+
         try {
 
-            const startTime = new Date().getTime();
+            log.error('Incoming Data', JSON.stringify(requestBody));
 
-            log.error('Incoming Data - MarkAsPicked', JSON.stringify(requestBody));
-            var savedTransfers = [];
-            var savedHeaders = [];
-            // STEP 1: Build existing SO map
-            var existingMap = {};
-            var binMap = getBinNameToIdMap();
-
-            var headerSearch = search.create({
-                type: 'customrecord_order_fulfillment_details',
-                filters: [
-                    ["custrecord_jyswms_rel_item_ful", "anyof", "@NONE@"],
-                    'AND',
-                    ["isinactive", "is", "F"]
-                    // , 'AND',
-                    //  ['custrecord_jyswms_carrier_pro_number', 'isempty']
-                ],
-                columns: ['internalid', 'custrecord_jyswms_sales_order_id']
-            });
-            headerSearch.run().each(function (result) {
-                existingMap[result.getValue('custrecord_jyswms_sales_order_id')] = result.id;
-                return true;
-            });
-            log.audit('Existing SO Map', JSON.stringify(existingMap));
-
-            // Validate request body structure
-            if (!requestBody || !requestBody.data || !Array.isArray(requestBody.data)) {
-                return {
-                    status: 'error',
-                    message: 'Invalid request body: data array is required'
-                };
+            if (!requestBody || !requestBody.data) {
+                throw 'Invalid payload';
             }
 
-            // STEP 2: Process each sales order in JSON
-            for (var d = 0; d < requestBody.data.length; d++) {
-                var Data = requestBody.data[d];
-                var salesOrders = Data.salesOrders || [];
+            // =====================================
+            // GROUP BY SALES ORDER
+            // =====================================
+            var soMap = {};
 
-                // Skip if no sales orders in this data item
-                if (!salesOrders || salesOrders.length === 0) {
-                    log.error('No sales orders found in data item', d);
-                    continue;
-                }
+            requestBody.data.forEach(function (bin) {
 
-                for (var i = 0; i < salesOrders.length; i++) {
+                var missingStatus = bin.missing_status;
 
-                    var so = salesOrders[i];
-                    var salesOrderId = so.salesOrderId;
+                (bin.salesOrders || []).forEach(function (soLine) {
 
-                    try {
-                        if (salesOrderId && jyswmsApiCustRecId) {
-                            record.submitFields({
-                                type: 'customrecord_wms_ai_api_custom_rec',
-                                id: jyswmsApiCustRecId,
-                                values: {
-                                    custrecord_jyswms_related_tran_record: salesOrderId
-                                },
-                                options: {
-                                    enableSourcing: false,
-                                    ignoreMandatoryFields: true
-                                }
+                    var soId = soLine.salesOrderId;
+
+                    if (!soMap[soId]) {
+                        soMap[soId] = {
+                            lines: [],
+                            tracking: [],
+                            totalPicked: 0,
+                            missingStatus: missingStatus
+                        };
+                    }
+
+                    var pickedQty = Number(soLine.picked_quantity) || 0;
+
+                    soMap[soId].totalPicked += pickedQty;
+                    soMap[soId].lines.push(soLine);
+
+                    (soLine.labelData || []).forEach(function (label) {
+                        if (label.tracking_number) {
+                            soMap[soId].tracking.push({
+                                trackingNumber: label.tracking_number,
+                                itemName: soLine.item,
+                                itemInternalId: soLine.itemInternalId
                             });
                         }
-
-                    } catch (error) {
-                        log.error("error setting the so", error.message)
-                    }
-
-
-
-                    if (!salesOrderId) continue;
-
-                    var itemId = so.itemInternalId || Data.itemInternalId || Data.item || '';
-                    var pickQty = Data.picked_quantity || 0;
-                    var binId = Data.binInternalId || '';
-                    var uniqueId = so.unique_id || '';
-                    var isClose = (
-                        isTruthyFlag(Data.isClose) ||
-                        isTruthyFlag(Data.is_close) ||
-                        isTruthyFlag(so.is_close)
-                    );
-                    var locationId = Data.locationId || null;
-
-
-
-                    if (!locationId && Data.location) {
-                        locationId = Data.location === "L60-Hardeeville_SC" ? 15 : 9;
-                    }
-
-                    if (!binId) {
-                        var binNumber = Data.bin;
-                        binId = binMap[binNumber]
-                    }
-
-                    var savedId = so.bin_transfer_internal_id || "";
-                    var portalId = requestBody.portalId || requestBody.portalid;
-                    var pickerName = requestBody.userName || requestBody.username || requestBody.pickerName;
-
-
-
-
-                    var trackingNumbers = [];
-
-                    // --- Extract tracking numbers safely ---
-                    var trackingList = (so.labelData || [])
-                        .map(function (l) {
-                            return l.sscc_code || l.tracking_number || "";
-                        })
-                        .filter(Boolean);
-
-                    // --- Extract SSCC codes ONLY if labelData2 exists ---
-                    var ssccList = (so.labelData2 || [])
-                        .map(function (l) {
-                            return l.sscc_code || l.tracking_number || "";
-                        })
-                        .filter(Boolean);
-
-                    log.error("trackingList", trackingList);
-                    log.error("ssccList", ssccList);
-
-
-                    if (so.packing_slip) {
-                        trackingList = [];
-
-                        trackingList = (so.labelData || [])
-                            .map(function (l) {
-                                return l.tracking_number || "";
-                            })
-                            .filter(Boolean);
-
-                    }
-
-                    // --- CASE 1: labelData2 exists → pair by index ---
-                    if (ssccList.length && trackingList.length && !so.packing_slip) {
-
-                        var pairCount = Math.min(trackingList.length, ssccList.length);
-
-                        for (var i = 0; i < pairCount; i++) {
-                            trackingNumbers.push({
-                                ssccCode: ssccList[i],
-                                trackingNumber: trackingList[i]
-                            });
-                        }
-
-                    }
-                    // --- CASE 2: labelData2 does NOT exist → tracking only ---
-                    else if (!so.packing_slip) {
-                        trackingList.forEach(function (tn) {
-                            trackingNumbers.push({
-                                ssccCode: tn,       // fallback behavior
-                                trackingNumber: ""
-                            });
-                        });
-                    }
-                    else {
-                        trackingList.forEach(function (tn) {
-                            trackingNumbers.push({
-                                trackingNumber: tn,
-                                ssccCode: ""    // fallback behavi
-                            });
-                        });
-                    }
-
-
-
-
-                    log.error("trackingNumbers", trackingNumbers);
-
-
-                    log.audit('Processing SO in parts picking', {
-                        salesOrderId: salesOrderId,
-                        itemId: itemId,
-                        binId: binId,
-                        locationId: locationId,
-                        pickQty: pickQty
                     });
 
-                    // fallback lookup location if missing
-                    if (!locationId && binId) {
-                        var locationLookup = search.lookupFields({
-                            type: search.Type.BIN,
-                            id: binId,
-                            columns: ['location']
-                        });
-                        locationId = locationLookup.location && locationLookup.location[0] && locationLookup.location[0].value;
-                    }
-
-                    // Validate required fields before proceeding
-                    if (!itemId) {
-                        log.error('Missing itemId for sales order', salesOrderId);
-                        continue;
-                    }
-
-                    // If caller sent isClose flag, close SO line and skip pick flow
-                    if (isClose === true) {
-                        log.audit('isClose flag detected - closing SO line', {
-                            salesOrderId: salesOrderId,
-                            itemId: itemId,
-                            uniqueId: uniqueId
-                        });
-                        closeSalesOrderItem(salesOrderId, itemId, uniqueId);
-                        continue;
-                    }
-
-                    if (pickQty === null || pickQty === undefined) {
-
-
-                        log.error('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
-                        continue;
-
-                    }
-                    if (!locationId) {
-                        log.error('Missing locationId for sales order', salesOrderId);
-                        continue;
-                    }
-
-                    var bulkStageBin = (locationId === 9) ? 4859 : 16692;
-
-                    // STEP 3: Load or create header
-                    headerId = existingMap[salesOrderId];
-                    log.error("headerId", headerId);
-                    var headerRec;
-                    if (headerId) {
-                        headerRec = record.load({
-                            type: 'customrecord_order_fulfillment_details',
-                            id: headerId,
-                            isDynamic: true
-                        });
-                    } else {
-
-                        headerRec = record.create({
-                            type: 'customrecord_order_fulfillment_details',
-                            isDynamic: true
-                        });
-                        headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
-                        headerRec.setValue('custrecord_jyswms_portal_id', portalId);
-                        headerRec.setValue('custrecord_jyswms_location_id', locationId);
-                        // Save new record first to get the ID before adding lines
-                        headerId = headerRec.save();
-                        existingMap[salesOrderId] = headerId;
-                       // log.error("Created new header record", headerId);
-                    }
-
-                    // STEP 4: Create Bin Transfer
-                    if (savedId) {
-                        log.error("savedId -- bintrnasferid", savedId);
-                    } else {
-
-                        try {
-
-                            var binTransferRec = record.create({ type: 'bintransfer', isDynamic: true });
-                            binTransferRec.setValue({ fieldId: 'subsidiary', value: 1 });
-                            binTransferRec.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-                            binTransferRec.setValue({ fieldId: 'memo', value: 'Bin Transfer via Restlet' });
-                            binTransferRec.setValue({ fieldId: 'location', value: locationId });
-                            binTransferRec.setValue({ fieldId: 'custbody_jyswms_item_unique_id', value: uniqueId });
-                            binTransferRec.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName });
-                            binTransferRec.setValue({ fieldId: 'custbody_realted_sales_order', value: salesOrderId });
-
-                            binTransferRec.selectNewLine({ sublistId: 'inventory' });
-                            binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
-                            binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'quantity', value: pickQty });
-
-                            var inventoryDetail = binTransferRec.getCurrentSublistSubrecord({
-                                sublistId: 'inventory',
-                                fieldId: 'inventorydetail'
-                            });
-                            inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: binId });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: pickQty });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'tobinnumber', value: bulkStageBin });
-                            inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
-
-                            binTransferRec.commitLine({ sublistId: 'inventory' });
-
-                            log.audit('BinTransfer Record - Before Save', {
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty,
-                                fromBin: binId,
-                                toBin: bulkStageBin
-                            });
-
-                            // Save bin transfer with error handling
-                            // var savedId = null;
-
-                            try {
-                                savedId = binTransferRec.save();
-                            } catch (e) {
-                                log.error("error saving bintransfer", e.message);
-                            }
-                            //  log.error("BinTransfer savedId", savedId);
-                        } catch (binTransferError) {
-                            log.error('Failed to save bin transfer', {
-                                error: binTransferError.message,
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty
-                            });
-                            // Bin transfer failed, but continue processing to create custom record line
-
-                        }
-                    }
-
-                    // STEP 5: Reload header record before adding lines (ensures fresh copy)
-                    // This is critical: ensures we have the latest version before adding sublist lines
-                    headerRec = record.load({
-                        type: 'customrecord_order_fulfillment_details',
-                        id: headerId,
-                        isDynamic: true
-                    });
-
-                    try {
-
-                        var singleIf = headerRec.getValue('custrecord_jywms_single_if_from_customer');
-                        if (!singleIf) {
-                            headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
-                            headerRec.setValue('custrecord_jyswms_approved', true);
-                        }
-                       headerRec.setValue('custrecord_jyswms_location_id', locationId);
-
-                    } catch (error) {
-                        log.error("error message", error.message);
-                    }
-
-
-                    // STEP 6: Adding JYSWMS sales order Items (custom recrd lines)
-                    var line = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_sales_order_header' });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item', value: itemId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_order_qty', value: so.quantity });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_picked_qty', value: pickQty });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_sales_order', value: salesOrderId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_picked_bin', value: binId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jswms_item_so_item_qty', value: so.item_quantity });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_so_line_loc', value: locationId });
-                    // Initialize inventory adjustment ID
-                    var invAdjId = "";
-
-                    // Wrap entire negative inventory adjustment logic in try-catch block
-                    try {
-                        var soItemQuantity = so.quantity;
-                        // log.error("soItemQuantity", soItemQuantity);
-
-                        var userPickedQty = pickQty;
-                        //  log.error("userPickedQty", userPickedQty);
-
-                        // Calculate quantity difference
-                        var qtyDiff = soItemQuantity - userPickedQty;
-                        if (qtyDiff <= 0) {
-                            log.debug("No adjustment needed — fully picked");
-                            // Continue processing without adjustment
-                        } else {
-                            // Create inventory adjustment if there's a shortfall
-                            var negativeQty = -qtyDiff;
-                            log.debug(" Negative inventory adjustment - NegativeQuanity : ", negativeQty);
-
-                            var inventoryAdjRec = record.create({
-                                type: record.Type.INVENTORY_ADJUSTMENT,
-                                isDynamic: true
-                            });
-
-                            // Set subsidiary (update if your account uses multiple)
-                            inventoryAdjRec.setValue({
-                                fieldId: 'subsidiary',
-                                value: 1
-                            });
-
-                            inventoryAdjRec.setValue({ fieldId: 'adjlocation', value: locationId });
-
-                            inventoryAdjRec.setValue({
-                                fieldId: 'account',
-                                value: 464 // update as needed
-                            });
-
-                            inventoryAdjRec.setValue({ fieldId: 'memo', value: 'Auto negative adjustment for bin: ' + binId });
-
-                            // Add inventory line
-                            inventoryAdjRec.selectNewLine({ sublistId: 'inventory' });
-
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'item',
-                                value: itemId
-                            });
-
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'location',
-                                value: locationId
-                            });
-
-                            // Set quantity before inventory detail
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'adjustqtyby',
-                                value: negativeQty
-                            });
-
-                            // Lookup item properties safely
-                            var itemLookup = search.lookupFields({
-                                type: search.Type.ITEM,
-                                id: itemId,
-                                columns: ['usebins', 'recordtype']
-                            });
-
-                            // log.error('Item Lookup', JSON.stringify(itemLookup));
-
-                            var useBins =
-                                itemLookup.usebins === true ||
-                                itemLookup.usebins === 'T' ||
-                                (Array.isArray(itemLookup.usebins) && itemLookup.usebins[0] === 'T');
-
-                            var isInventoryItem =
-                                ['inventoryitem', 'serializedinventoryitem', 'lotnumberedinventoryitem'].includes(itemLookup.recordtype);
-
-                            if (useBins && isInventoryItem && binId) {
-                                try {
-                                    var invDetail = inventoryAdjRec.getCurrentSublistSubrecord({
-                                        sublistId: 'inventory',
-                                        fieldId: 'inventorydetail'
-                                    });
-
-                                    // 1.Remove existing inventory assignment lines
-                                    var existingLines = invDetail.getLineCount({ sublistId: 'inventoryassignment' });
-                                    for (var k = existingLines - 1; k >= 0; k--) {
-                                        invDetail.removeLine({ sublistId: 'inventoryassignment', line: k });
-                                    }
-                                    // log.error(" Cleared Existing Inventory Lines", existingLines);
-
-                                    // 2: Add new inventory assignment
-                                    invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-
-                                    invDetail.setCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'binnumber',
-                                        value: binId
-                                    });
-                                    invDetail.setCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'quantity',
-                                        value: negativeQty
-                                    });
-
-                                    // Step 3: Verify values before commit
-                                    var getBinID = invDetail.getCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'binnumber'
-                                    });
-                                    var getQty = invDetail.getCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'quantity'
-                                    });
-
-
-                                    invDetail.commitLine({ sublistId: 'inventoryassignment' });
-                                    log.audit(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
-
-                                } catch (invDetailError) {
-                                    log.error("❌ Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
-                                    // Continue with adjustment even if inventory detail fails
-                                }
-                            } else {
-                                log.error("Skipping inventory detail — missing bin or not inventory-managed");
-                            }
-
-                            inventoryAdjRec.commitLine({ sublistId: 'inventory' });
-
-                            var summary = {
-                                itemId: itemId,
-                                binId: binId,
-                                locationId: locationId,
-                                negativeQty: negativeQty
-                            };
-
-
-                            // Save record
-                            invAdjId = inventoryAdjRec.save({
-                                enableSourcing: true,
-                                ignoreMandatoryFields: true
-                            });
-
-                            log.error(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
-                        }
-                    } catch (negativeInvError) {
-                        log.error(" Negative Inventory Adjustment Error", {
-                            error: negativeInvError.name + " | " + negativeInvError.message,
-                            salesOrderId: salesOrderId,
-                            itemId: itemId,
-                            pickQty: pickQty
-                        });
-                        // Continue processing even if adjustment fails - invAdjId remains null
-                    }
-
-                    // Set bin transfer ID and inventory adjustment ID on the line
-                    // Only set bin transfer ID if bin transfer was successful
-                    if (savedId) {
-                        line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_item_bintransfer_id', value: savedId });
-                    }
-
-                    if (invAdjId) {
-                        line.setCurrentSublistValue({
-                            sublistId: 'recmachcustrecord_sales_order_header',
-                            fieldId: 'custrecord_jyswms_item_inv_adjy',
-                            value: invAdjId
-                        });
-                    }
-
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_uniqueid', value: uniqueId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_portal_id', value: portalId });
-
-                    line.setCurrentSublistValue({
-                        sublistId: 'recmachcustrecord_sales_order_header',
-                        fieldId: 'custrecord_jyswms_item_picker_name',
-                        value: pickerName
-                    });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_tracking_numbers', value: trackingNumbers.length || 0 });
-                    headerRec.commitLine({ sublistId: 'recmachcustrecord_sales_order_header' });
-
-                    // STEP 7: Add tracking sublist lines lines
-                    // log.error('Tracking Numbers', trackingNumbers);
-
-                    trackingNumbers.forEach(function (track) {
-
-                        // if (!track || !track.ssccCode) {
-                        //     log.error("Skipping – SSCC missing", track);
-                        //     return;
-                        // }
-                        if (!track) {
-                            log.error("Skipping – track missing", track);
-                            return;
-                        }
-
-                        // 🔍 CHECK IN SUBLIST (not input array)
-                        if (ssccExistsInSublist(headerRec, track.ssccCode)) {
-                            log.error("Skipping – SSCC already exists in sublist", track.ssccCode);
-                            return;
-                        }
-
-
-                        log.error("track", track);
-                        var trackLine = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_item', value: itemId });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_number', value: track.ssccCode });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_so_id', value: salesOrderId });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_qty', value: 1 });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_uniqueid', value: uniqueId });
-                        log.error("track.tracking number", track.trackingNumber)
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_dropship', value: track.trackingNumber || " " });
-                        headerRec.commitLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
-                    });
-
-                    // log.error("Started Header line set");
-
-                    //  Get total SO quantity from Sales Order
-                    var soLookup = search.lookupFields({
-                        type: 'salesorder',
-                        id: salesOrderId,
-                        columns: ['custbody_so_total_qty']
-                    });
-                    var totalSOQty = Number(soLookup.custbody_so_total_qty) || 0;
-
-                    //  Calculate total picked quantity from all item lines
-                    var totalPickedQty = 0;
-                    var lineCount = headerRec.getLineCount({ sublistId: 'recmachcustrecord_sales_order_header' });
-                    for (var l = 0; l < lineCount; l++) {
-                        var linePicked = Number(headerRec.getSublistValue({
-                            sublistId: 'recmachcustrecord_sales_order_header',
-                            fieldId: 'custrecord_jyswms_item_picked_qty',
-                            line: l
-                        })) || 0;
-                        totalPickedQty += linePicked;
-                    }
-
-                    // Set both totals on header
-                    headerRec.setValue({ fieldId: 'custrecord_jyswms_total_so_qty', value: totalSOQty });
-                    headerRec.setValue({ fieldId: 'custrecord_jyswms_total_pick_qty', value: totalPickedQty });
-
-                    //  Compare totals and set Approved checkbox
-                    var isApproved = (totalSOQty <= totalPickedQty);
-                    headerRec.setValue({
-                        fieldId: 'custrecord_jyswms_approved',
-                        value: isApproved ? true : false
-                    });
-
-                    log.error('Header Totals and Approval', {
-                        totalSOQty: totalSOQty,
-                        totalPickedQty: totalPickedQty,
-                        approved: isApproved
-                    });
-
-                    // Save header record with error handling
-                    try {
-                        headerId = headerRec.save();
-                        // log.error("Saved Header", headerId);
-                        existingMap[salesOrderId] = headerId;
-
-                        // Add to response arrays for each sales order
-                        // Only add bin transfer ID if bin transfer was successful
-                        if (savedId) {
-                            savedTransfers.push(savedId);
-                        }
-                        savedHeaders.push(headerId);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                    } catch (headerSaveError) {
-                        log.error('Failed to save header record', {
-                            error: headerSaveError.message,
-                            salesOrderId: salesOrderId,
-                            headerId: headerId
-                        });
-                        // Continue to next sales order instead of failing entire batch
-                        continue;
-                    }
-                }
-
-                log.audit("MarkAsPicked", "savedTransfers: " + JSON.stringify(savedTransfers) + ", savedHeaders: " + JSON.stringify(savedHeaders));
-
-            }
-            const endTime = new Date().getTime();
-
-            // Build expected JSON response
-            const expectedResponse = {
-                status: 'success',
-                message: 'Items & tracking numbers processed successfully',
-                binTransferId: savedTransfers,
-                customRecID: savedHeaders
-            };
-
-            // Log the expected JSON response
-            log.debug('Expected JSON Response - MarkASpicked', JSON.stringify(expectedResponse));
-
-            return expectedResponse;
-
-        }
-        catch (e) {
-            log.error('POST Error', e);
-            if (headerId) {
-                record.submitFields({
-                    type: 'customrecord_order_fulfillment_details',
-                    id: headerId,
-                    values: {
-                        custrecord_jyswms_error: e.message,
-                        custrecord_jyswms_item_error_: e.message
-                    }
                 });
-            }
+
+            });
+
+            // =====================================
+            // PROCESS EACH SALES ORDER
+            // =====================================
+            Object.keys(soMap).forEach(function (soId) {
+
+                var soData = soMap[soId];
+                log.error('Processing SO', {
+                    soId: soId,
+                    totalPicked: soData.totalPicked,
+                    missingStatus: soData.missingStatus,
+                    trackingCount: soData.tracking.length
+                });
+                // =====================================
+                // 🚫 CASE 1: NOTHING PICKED
+                // =====================================
+                if (soData.totalPicked == 0) {
+
+                    var soRec = record.load({
+                        type: record.Type.SALES_ORDER,
+                        id: soId,
+                        isDynamic: false
+                    });
+                    var status = soRec.getValue('orderstatus');
+
+                    if (status !== 'B') {
+                        log.error('SO Skipped - Not Pending Fulfillment', {
+                            soId: soId,
+                            status: status
+                        });
+                        return;
+                    }
+                    soRec.setValue('custbody_parts_jy_wms_status', soData.missingStatus || 'Missing');
+                    soRec.setValue('custbody_jys_parts_not_availble', true);
+                    soRec.save();
+                    log.error('SO Updated - No Fulfillment', soId);
+                    return;
+                }
+
+                // =====================================
+                // ✅ CASE 2: CREATE FULFILLMENT
+                // =====================================
+
+                // ---- Load SO for remaining qty
+                var soRec = record.load({
+                    type: record.Type.SALES_ORDER,
+                    id: soId,
+                    isDynamic: false
+                });
+                var status = soRec.getValue('orderstatus');
+
+                if (status !== 'B') {
+                    log.error('SO Skipped - Not Pending Fulfillment', {
+                        soId: soId,
+                        status: status
+                    });
+                    return;
+                }
+                var soLineCount = soRec.getLineCount({ sublistId: 'item' });
+                var soRemainingMap = {};
+
+                for (var i = 0; i < soLineCount; i++) {
+
+                    var itemId = soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'item',
+                        line: i
+                    });
+
+                    var orderedQty = Number(soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantity',
+                        line: i
+                    })) || 0;
+
+                    var fulfilledQty = Number(soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'quantityfulfilled',
+                        line: i
+                    })) || 0;
+
+                    var remainingQty = orderedQty - fulfilledQty;
+
+                    if (!soRemainingMap[itemId]) {
+                        soRemainingMap[itemId] = 0;
+                    }
+
+                    soRemainingMap[itemId] += remainingQty;
+                }
+
+                // ---- Transform
+                var fulfillment = record.transform({
+                    fromType: record.Type.SALES_ORDER,
+                    fromId: soId,
+                    toType: record.Type.ITEM_FULFILLMENT,
+                    isDynamic: true
+                });
+                fulfillment.setValue("shipstatus", "C"); // Set to 'Packed'
+
+                var lineCount = fulfillment.getLineCount({ sublistId: 'item' });
+
+                for (var j = 0; j < lineCount; j++) {
+
+                    fulfillment.selectLine({
+                        sublistId: 'item',
+                        line: j
+                    });
+
+                    var itemId = fulfillment.getCurrentSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'item'
+                    });
+
+                    var matchedLine = soData.lines.find(function (l) {
+                        return Number(l.itemInternalId) === Number(itemId);
+                    });
+
+                    var remainingQty = soRemainingMap[itemId] || 0;
+
+                    if (matchedLine && remainingQty > 0) {
+
+                        var pickedQty = Number(matchedLine.picked_quantity) || 0;
+                        var fulfillQty = Math.min(pickedQty, remainingQty);
+
+                        if (fulfillQty > 0) {
+
+                            fulfillment.setCurrentSublistValue({
+                                sublistId: 'item',
+                                fieldId: 'itemreceive',
+                                value: true
+                            });
+
+                            fulfillment.setCurrentSublistValue({
+                                sublistId: 'item',
+                                fieldId: 'quantity',
+                                value: fulfillQty
+                            });
+
+                            soRemainingMap[itemId] -= fulfillQty;
+
+                        } else {
+                            fulfillment.setCurrentSublistValue({
+                                sublistId: 'item',
+                                fieldId: 'itemreceive',
+                                value: false
+                            });
+                        }
+
+                    } else {
+                        fulfillment.setCurrentSublistValue({
+                            sublistId: 'item',
+                            fieldId: 'itemreceive',
+                            value: false
+                        });
+                    }
+
+                    fulfillment.commitLine({ sublistId: 'item' });
+                }
+
+                // ---- Add tracking (optional but included)
+                var seenTracking = {};
+
+                soData.tracking.forEach(function (pkg) {
+
+                    if (!pkg.trackingNumber) return;
+                    if (seenTracking[pkg.trackingNumber]) return;
+
+                    seenTracking[pkg.trackingNumber] = true;
+
+                    fulfillment.selectNewLine({ sublistId: 'package' });
+
+                    var weight = _getItemWeight(pkg.itemInternalId);
+
+                    fulfillment.setCurrentSublistValue({
+                        sublistId: 'package',
+                        fieldId: 'packageweight',
+                        value: weight > 0 ? weight : 1
+                    });
+
+                    fulfillment.setCurrentSublistValue({
+                        sublistId: 'package',
+                        fieldId: 'packagetrackingnumber',
+                        value: pkg.trackingNumber
+                    });
+
+                    fulfillment.commitLine({ sublistId: 'package' });
+
+                });
+
+                var fulfillmentId = fulfillment.save({
+                    enableSourcing: true,
+                    ignoreMandatoryFields: true
+                });
+
+                log.error('Fulfillment Created', fulfillmentId);
+
+                createCustomPackageContents(fulfillmentId, soData.tracking);
+
+            });
+
+            return { status: 'success' };
+
+        } catch (e) {
+            log.error('POST Error', e);
             return { status: 'error', message: e.message };
         }
     }
-//depen
-    function getBinNameToIdMap() {
+
+    // =====================================
+    // CUSTOM PACKAGE FUNCTION (same)
+    // =====================================
+    function createCustomPackageContents(fulfillmentId, trackingArray) {
         try {
-            var binMap = {};
-
-            var binSearch = search.create({
-                type: search.Type.BIN,
-                filters: [],
-                columns: [
-                    search.createColumn({ name: 'binnumber' }),
-                    search.createColumn({ name: 'internalid' })
-                ]
-            });
-
-            var pagedData = binSearch.runPaged({
-                pageSize: 1000
-            });
-
-            pagedData.pageRanges.forEach(function (pageRange) {
-                var page = pagedData.fetch({
-                    index: pageRange.index
-                });
-
-                page.data.forEach(function (result) {
-                    var binName = result.getValue({ name: 'binnumber' });
-                    var binId = result.getValue({ name: 'internalid' });
-
-                    if (binName && binId) {
-                        binMap[binName] = binId;
-                    }
-                });
-            });
-
-            return binMap;
-
-        } catch (e) {
-            log.error('Error building bin map', e.message);
-            return {};
-        }
-    }
-
-    function ssccExistsInSublist(headerRec, ssccCode) {
-        var sublistId = 'recmachcustrecord_jyswms_so_header';
-        var lineCount = headerRec.getLineCount({ sublistId: sublistId });
-
-        for (var i = 0; i < lineCount; i++) {
-            var existingSscc = headerRec.getSublistValue({
-                sublistId: sublistId,
-                fieldId: 'custrecord_jyswms_track_number',
-                line: i
-            });
-
-            if (existingSscc && existingSscc === ssccCode) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-   * Treat various truthy inputs (boolean true, "true", "True", "1") as true.
-   */
-    function isTruthyFlag(val) {
-        if (val === true) return true;
-        if (typeof val === 'string') {
-            var lowered = val.trim().toLowerCase();
-            return lowered === 'true' || lowered === '1';
-        }
-        if (val === 1) return true;
-        return false;
-    }
-
-    /**
-     * Close matching item lines on a sales order.
-     * This is called when the payload sends isClose=true.
-     */
-    function closeSalesOrderItem(salesOrderId, itemId, uniqueId) {
-        try {
-            var soRec = record.load({
-                type: record.Type.SALES_ORDER,
-                id: salesOrderId,
+            var fulfillmentRec = record.load({
+                type: record.Type.ITEM_FULFILLMENT,
+                id: fulfillmentId,
                 isDynamic: true
             });
 
-            var lineCount = soRec.getLineCount({ sublistId: 'item' });
-            var closedLines = [];
+            var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
 
-            for (var i = 0; i < lineCount; i++) {
-                var lineItemId = soRec.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'item',
-                    line: i
+            var count = fulfillmentRec.getLineCount({ sublistId: sublistId });
+
+            for (var i = count - 1; i >= 0; i--) {
+                fulfillmentRec.removeLine({
+                    sublistId: sublistId,
+                    line: i,
+                    ignoreRecalc: true
                 });
-
-                if (String(lineItemId) === String(itemId)) {
-                    soRec.selectLine({ sublistId: 'item', line: i });
-                    soRec.setCurrentSublistValue({
-                        sublistId: 'item',
-                        fieldId: 'isclosed',
-                        value: true
-                    });
-                    soRec.commitLine({ sublistId: 'item' });
-                    closedLines.push(i);
-                }
             }
 
-            if (closedLines.length > 0) {
-                var updatedId = soRec.save();
-                log.audit('Closed SO item lines', {
-                    salesOrderId: salesOrderId,
-                    itemId: itemId,
-                    lines: closedLines,
-                    uniqueId: uniqueId,
-                    savedId: updatedId
-                });
-                return true;
-            }
+            var seen = {};
+            var box = 0;
 
-            log.error('No matching item lines to close', {
-                salesOrderId: salesOrderId,
-                itemId: itemId,
-                uniqueId: uniqueId
+            trackingArray.forEach(function (line) {
+
+                if (!line.trackingNumber) return;
+                if (seen[line.trackingNumber]) return;
+
+                seen[line.trackingNumber] = true;
+                box++;
+
+                var weight = _getItemWeight(line.itemInternalId) || 0;
+                weight = weight > 0 ? weight : 1;
+                fulfillmentRec.selectNewLine({ sublistId: sublistId });
+
+                fulfillmentRec.setCurrentSublistValue({
+                    sublistId: sublistId,
+                    fieldId: 'custrecordhj_pkgbox',
+                    value: box
+                });
+
+                fulfillmentRec.setCurrentSublistValue({
+                    sublistId: sublistId,
+                    fieldId: 'custrecordhj_pkg_trackingnumber',
+                    value: line.trackingNumber
+                });
+
+                fulfillmentRec.setCurrentSublistValue({
+                    sublistId: sublistId,
+                    fieldId: 'custrecordhj_pkg_desc',
+                    value: line.itemName + '/1'
+                });
+
+                fulfillmentRec.setCurrentSublistValue({
+                    sublistId: sublistId,
+                    fieldId: 'custrecordhj_tc_packagecontentslbs',
+                    value: weight
+                });
+
+                fulfillmentRec.setCurrentSublistValue({
+                    sublistId: sublistId,
+                    fieldId: 'custrecord_jyswms_createdfrom',
+                    value: true
+                });
+
+                fulfillmentRec.setCurrentSublistValue({
+                    sublistId: sublistId,
+                    fieldId: 'custrecord_jyswms_item_not_populated',
+                    value: true
+                });
+
+                fulfillmentRec.commitLine({ sublistId: sublistId });
+
             });
-            return false;
+
+            fulfillmentRec.save({
+                enableSourcing: true,
+                ignoreMandatoryFields: true
+            });
+
         } catch (e) {
-            log.error('Failed to close SO item lines', {
-                salesOrderId: salesOrderId,
-                itemId: itemId,
-                uniqueId: uniqueId,
-                error: e.message
-            });
-            return false;
+            log.error('Custom Package Error', e);
         }
     }
 
-   
+    function _getItemWeight(itemId) {
+        try {
+            var itemFields = search.lookupFields({
+                type: 'noninventoryitem',
+                id: itemId,
+                columns: ['weight']
+            });
+            return itemFields.weight;
+        } catch (e) {
+            log.error('Error occurred while fetching item weight', e);
+            return 0;
+        }
+    }
+
 
     return {
         fullFillPartsOrder: markAfullFillPartsOrsersPicked
     };
+
 });

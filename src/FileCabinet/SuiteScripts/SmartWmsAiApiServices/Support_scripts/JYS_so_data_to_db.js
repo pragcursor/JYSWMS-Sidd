@@ -8,7 +8,7 @@ define([
     'N/https',
     'N/record',
     '../JYSWMS_generateToken_API.js',
-    '../Orders/orderUtils.js'
+    '../Orders/orderUtils'
 ], function (log, https, record, tokenModule, autoLocUtil) {
 
 
@@ -158,6 +158,38 @@ define([
 
             // log.debug('No Shipping Changes Detected', tranId);
 
+            var partsitem = newRec.findSublistLineWithValue({
+                sublistId: 'item',
+                fieldId: 'itemtype',
+                value: 'NonInvtPart'
+            });
+            // check if there is any changes in description for parts item and if there is then trigger the wms sync
+            if (partsitem != -1) {
+
+                const oldDesc = oldRec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'description',
+                    line: partsitem
+                });
+                const newDesc = newRec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'description',
+                    line: partsitem
+                });
+                if (oldDesc !== newDesc) {
+                    log.error('Item Description Changed for Parts Item', {
+                        line: partsitem,
+                        oldDesc,
+                        newDesc,
+                        tranId
+                    });
+                    processOrder(soId, tranId);
+                    emptystatus(soId);
+                    return;
+                }
+
+            }
+
         }
 
         catch (e) {
@@ -215,7 +247,24 @@ define([
 
     };
 
+    function emptystatus(soId) {
+        try {
+            record.submitFields({
+                type: record.Type.SALES_ORDER,
+                id: soId,
+                values: {
+                    custbody_parts_jy_wms_status: ' '
+                },
+                options: {
+                    enableSourcing: false,
+                    ignoreMandatoryFields: true
+                }
+            });
+        } catch (e) {
+            log.error('Failed to empty error status on SO', e);
+        }
 
+    }
     const storeErrorOnSO = (soId, message) => {
 
         try {

@@ -69,6 +69,24 @@ define([
                 return;
             }
 
+            var shipErrors = extractShipErrors(sourceArray);
+
+            if (shipErrors) {
+                record.submitFields({
+                    type: recType,
+                    id: recId,
+                    values: {
+                        custbody_jys_ship_erros: shipErrors
+                    },
+                    options: {
+                        enableSourcing: false,
+                        ignoreMandatoryFields: true
+                    }
+                });
+
+                log.audit('Ship Errors Updated', shipErrors);
+            }
+
             // -----------------------------
             // BUILD MAPS
             // -----------------------------
@@ -251,7 +269,7 @@ define([
                 readyQty = maps.readyForPickMap[key] || 0;
                 dbQty = maps.dbQtyMap[key] || 0;
 
-            } 
+            }
             // =============================
             // FALLBACK (ONLY IF NO MATCH)
             // =============================
@@ -329,6 +347,24 @@ define([
                 error: e.message
             };
         }
+    }
+
+
+    function extractShipErrors(sourceArray) {
+
+        var errors = [];
+
+        if (!sourceArray.length || !sourceArray[0].data) return '';
+
+        sourceArray[0].data.forEach(function (line) {
+
+            if (line.ship_error && String(line.ship_error).trim()) {
+                errors.push(line.ship_error.trim());
+            }
+
+        });
+
+        return errors.join(' | '); // or return errors[0] for first-only approach
     }
 
     return {

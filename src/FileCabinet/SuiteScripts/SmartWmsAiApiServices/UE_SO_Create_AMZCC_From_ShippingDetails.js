@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
+define(['N/record', 'N/search', 'N/log','N/ui/serverWidget'], function (record, search, log, serverWidget) {
 
     function afterSubmit(context) {
 
@@ -192,7 +192,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
             fieldId: 'status'
         });
 
-       var restrictedStatuses = ['closed', 'cancelled', 'billed'];
+        var restrictedStatuses = ['closed', 'cancelled', 'billed'];
 
         if (restrictedStatuses.includes(sostatus.toLowerCase())) {
             rec.setValue({
@@ -256,6 +256,38 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
                 }
             </style>
         `;
+
+        var wmsStatus = rec.getValue({
+            fieldId: 'custbody_parts_jy_wms_status'
+        });
+
+        if (wmsStatus) {
+
+            var statusField = form.addField({
+                id: 'custpage_wms_status_badge',
+                type: 'inlinehtml',
+                label: 'Parts Status'
+            });
+
+            statusField.defaultValue = `
+                <div style="
+                    margin: 10px 0;
+                    padding: 8px 14px;
+                    display: inline-block;
+                    background-color: #d9534f;
+                    color: #fff;
+                    border-radius: 20px;
+                    font-weight: 600;
+                    font-size: 13px;
+                ">
+                    Parts Status: ${wmsStatus}
+                </div>
+            `;
+
+            statusField.updateLayoutType({
+                layoutType: serverWidget.FieldLayoutType.OUTSIDEABOVE
+            });
+        }
     }
 
 

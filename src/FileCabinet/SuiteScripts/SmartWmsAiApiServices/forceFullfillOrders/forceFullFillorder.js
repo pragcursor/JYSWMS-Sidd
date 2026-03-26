@@ -5,12 +5,15 @@
 define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_generateToken_API'], function (record, search, log, https, runtime, generateTokenAPI) {
 
 
-    function fullFillOrder(salesOrderId) {
+       function fullFillOrder(salesOrderId) {
       //  log.error("fullFillOrder triggered for SO ID", salesOrderId);
         var orderData = sendData(salesOrderId);
       //  log.error("orderData", orderData);
         var transformed = transformItems(orderData);
        // log.error("transformed", transformed);
+
+      var customrecId;
+       var bolTrackingNumber;
 
      // return transformed;
         var orderByLocation = transformed.output;
@@ -90,12 +93,40 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                         var soStatus = search.lookupFields({
                             type: search.Type.SALES_ORDER,
                             id: salesOrderId,
-                            columns: ['status']
+                            columns: ['status', 'custbody_bol_tracking_number']
                         });
 
-                        log.error("soStatus", JSON.stringify(soStatus));
 
-                        if (soStatus.status[0].value === 'closed') { // Check if status is 'B' (Billed)
+                         bolTrackingNumber = soStatus.custbody_bol_tracking_number || '';
+
+                      
+                        log.error("soStatus", {
+                          status: JSON.stringify(soStatus),
+                          bolNumber :bolTrackingNumber }
+                                 );
+
+                      //var bolTrackingNumber = soStatus.custbody_bol_tracking_number || '';
+
+
+                         var headerSearch = search.create({
+                type: 'customrecord_order_fulfillment_details',
+                filters: [
+                    ['isinactive', 'is', 'F'],
+                    'AND',
+                    ['custrecord_jyswms_sales_order_id', 'anyof', salesOrderId]
+                ],
+                columns: ['internalid']
+            });
+
+            headerSearch.run().each(function (result) {
+                customrecId = result.id;
+                return false; // take first match only
+            });
+
+
+
+                      if (soStatus.status[0].text.toLowerCase() === 'closed') { // Check if status is 'B' (Billed)
+                          
                             var salesOrderRecord = record.load({
                                 type: record.Type.SALES_ORDER,
                                 id: salesOrderId,
@@ -126,6 +157,12 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
 
                     }
 
+        if (soStatus.status &&
+    soStatus.status.length &&
+    soStatus.status[0].text === 'Pending Fulfillment') {
+
+ 
+
                     try {
                         var fullfillorder = record.transform({
                             fromType: record.Type.SALES_ORDER,
@@ -134,7 +171,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                             isDynamic: true
                         });
 
-                        log.error("salesOrderId",salesOrderId);
+                        log.error("customrecId",customrecId);
 
 
                         fullfillorder.setValue({ fieldId: 'location', value: locationId});
@@ -247,20 +284,138 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     catch (e) {
                         log.error("Error in fullFillOrder", e.message);
                     }
+           
+}
+                 if (!fullfillmentId) {
+
+    var fulfillmentSearch = search.create({
+        type: search.Type.ITEM_FULFILLMENT,
+        filters: [
+            ['createdfrom', 'anyof', salesOrderId],
+            'AND',
+            ['mainline', 'is', 'T']
+        ],
+        columns: ['internalid']
+    });
+
+    var result = fulfillmentSearch.run().getRange({
+        start: 0,
+        end: 1
+    });
+
+    if (result && result.length) {
+        fullfillmentId = result[0].getValue({
+            name: 'internalid'
+        });
+    }
+
+    log.debug("Fetched fulfillmentId", fullfillmentId);
+}
+
 
                     if (fullfillmentId) {
 
-                      log.error("ready for packages",fullfillmentId)
-                      
-
                         var obj = trackingObjects;
+                       log.error("ready for packages",{
+                         "fullfillmentId": fullfillmentId,
+                          "obj": JSON.stringify(obj)
+                          });
 
-                        var createAmzccRecord = regularCreateAmazonRecords(obj, salesOrderId);
+                     // var createAmzccRecord = regularCreateAmazonRecords(obj, salesOrderId);
 
-                        var packageContent = packageContents(obj, fullfillmentId);
+                        var packageContent = packageContents(obj, fullfillmentId, customrecId, bolTrackingNumber);
+              var remaining = runtime.getCurrentScript().getRemainingUsage();
 
+        log.debug("Remaining Governance", remaining);
 
                     }
+
+
+
+
+                   if (salesOrderId) {
+                        var soStatus = search.lookupFields({
+                            type: search.Type.SALES_ORDER,
+                            id: salesOrderId,
+                            columns: ['status']
+                        });
+                  var statusText = soStatus.status && soStatus.status.length
+    ? soStatus.status[0].text
+    : '';
+
+if (
+    statusText === 'Partially Fulfilled' ||
+    statusText === 'Pending Billing'
+) {
+
+  var soRec = record.load({
+    id:salesOrderId,
+    type: 'salesorder'
+  });
+
+  var lineCount = soRec.getLineCount({sublistId: 'item'});
+  
+    for (var i = 0; i < lineCount; i++) {
+
+    var orderedQty = parseFloat(soRec.getSublistValue({
+        sublistId: 'item',
+        fieldId: 'quantity',
+        line: i
+    })) || 0;
+
+    var fulfilledQty = parseFloat(soRec.getSublistValue({
+        sublistId: 'item',
+        fieldId: 'quantityfulfilled',
+        line: i
+    })) || 0;
+
+    var isClosed = soRec.getSublistValue({
+        sublistId: 'item',
+        fieldId: 'isclosed',
+        line: i
+    });
+
+    // Case 1: nothing fulfilled → close line
+    if (!isClosed && fulfilledQty === 0) {
+
+        soRec.setSublistValue({
+            sublistId: 'item',
+            fieldId: 'isclosed',
+            line: i,
+            value: true
+        });
+
+        log.debug("Closing line", {
+            line: i,
+            orderedQty: orderedQty,
+            fulfilledQty: fulfilledQty
+        });
+    }
+
+    // Case 2: partial fulfilled → reduce order qty
+    else if (!isClosed && fulfilledQty > 0 && fulfilledQty < orderedQty) {
+
+        soRec.setSublistValue({
+            sublistId: 'item',
+            fieldId: 'quantity',
+            line: i,
+            value: fulfilledQty
+        });
+
+        log.debug("Reducing order qty", {
+            line: i,
+            oldQty: orderedQty,
+            newQty: fulfilledQty
+        });
+    }
+}
+
+soRec.save({
+    enableSourcing: false,
+    ignoreMandatoryFields: true
+});
+}
+                   }
                 }
 
                 catch (error) {
@@ -268,6 +423,9 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                 }
 
             }
+
+
+      
         }
 
 
@@ -409,6 +567,20 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                 var recordId = '';
                 var packageBoxNumber = 0;
 
+             
+
+           // var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
+            var existingCount = salesOrderRec.getLineCount({ sublistId });
+           // log.error("existingCount - recmachcustrecord_hj_packagecontents_sublist ", existingCount)
+
+            var removecount = 0;
+
+            // Clear existing package lines
+            for (var i = existingCount - 1; i >= 0; i--) {
+                salesOrderRec.removeLine({ sublistId, line: i, ignoreRecalc: true });
+                removecount++;
+            }
+
                 // Track duplicates
                 // var seenTrackingNumbers = {};
 
@@ -485,7 +657,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     ignoreMandatoryFields: true
                 });
 
-                log.audit('Amazon Records linked successfully', 'Sales Order ID: ' + salesOrderId);
+                log.audit('Amazon Records (AMZCC) linked successfully', 'Sales Order ID: ' + salesOrderId);
 
                 if (recordId) {
                     record.submitFields({
@@ -502,11 +674,36 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
             }
         }
 
-        function packageContents(trackingObj, fullfillmentId) {
+        function packageContents(trackingObj, fulfillmentId, customrecId, bolTrackingNumber) {
             try {
 
               log.error("trackingObj -- packages",trackingObj);
-              log.error("fullfillmentId -- packages",fullfillmentId);
+              log.error("fulfillmentId -- packages",fulfillmentId);
+
+
+                 var fulfillmentRec = record.load({
+                type: record.Type.ITEM_FULFILLMENT,
+                id: fulfillmentId,
+                isDynamic: true
+            });
+            var packageBoxNumber = 0;
+
+            var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
+            var existingCount = fulfillmentRec.getLineCount({ sublistId });
+           // log.error("existingCount - recmachcustrecord_hj_packagecontents_sublist ", existingCount)
+
+            var removecount = 0;
+
+            // Clear existing package lines
+            for (var i = existingCount - 1; i >= 0; i--) {
+                fulfillmentRec.removeLine({ sublistId, line: i, ignoreRecalc: true });
+                removecount++;
+            }
+
+              log.error("removecount",removecount);
+
+              var packagelines = [];
+              var box = 1;
                 trackingObj.forEach(function (track) {
 
                     // if (!track || !track.ssccCode) {
@@ -527,7 +724,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     // }
 
 
-                    // log.error("track", track);
+               //   log.error("track", track);
 
                     var packageRec = record.create({
                         type: 'customrecordhj_tc_package_contents',
@@ -539,10 +736,10 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                         value: true
                     });
 
-                    // packageRec.setValue({
-                    //     fieldId: 'custrecord_jyswms_related_cif',
-                    //     value: headerId
-                    // });
+                    packageRec.setValue({
+                        fieldId: 'custrecord_jyswms_related_cif',
+                        value: customrecId
+                    });
 
                     // SSCC code
                     packageRec.setValue({
@@ -559,11 +756,18 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                     // Tracking number
                     packageRec.setValue({
                         fieldId: 'custrecordhj_pkg_trackingnumber',
-                        value: track.trackingNumber || ''
+                        value: track.trackingNumber || bolTrackingNumber || ''
+                    });
+                   // Tracking number
+                    packageRec.setValue({
+                        fieldId: 'custrecordhj_pkgbox',
+                        value: box || ''
                     });
 
-                    // If you want to link to fulfillment/parent record and you have the field, uncomment and set correct field id:
-                    // packageRec.setValue({ fieldId: 'custrecord_hj_packagecontents_sublist', value: fulfillmentId });
+                  box++;
+
+                   // If you want to link to fulfillment/parent record and you have the field, uncomment and set correct field id:
+                    packageRec.setValue({ fieldId: 'custrecord_hj_packagecontents_sublist', value: fulfillmentId });
 
                     packageRec.setValue({
                         fieldId: 'custrecord_jyswms_item_id',
@@ -619,12 +823,10 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
                         ignoreMandatoryFields: false
                     });
 
-                    // packageLines.push(packageId);
-
-
-
-
+                    packagelines.push(packageId);
                 });
+
+              log.audit("packagelines",packagelines);
             }
 
             catch (e) {
@@ -814,12 +1016,12 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime','../JYSWMS_gener
             var line = lines[i];
             var qty = parseFloat(line.quantity) || 0;
 
-            // 🔑 Location fallback logic
+            // Location fallback logic
             var locationId =
                 line.location_id ||
                 (line.location_name === 'Flemington L41' ? 9 : 15);
 
-            if (!locationId || qty <= 0) continue;
+            if (!locationId || qty <= 0 || line.is_picked == null) continue;
 
             // Init location bucket
             if (!result[locationId]) {

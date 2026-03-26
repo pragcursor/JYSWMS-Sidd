@@ -2,7 +2,7 @@
  * @NApiVersion 2.x
  * @NModuleScope Public
  */
-define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (record, file, search, log, runtime) {
+define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime','../forceFullfillOrders/forceFullFillorder'], function (record, file, search, log, runtime, forceFullFillorder) {
 
 
 
@@ -1221,65 +1221,72 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             log.error('fileId ' + fileId);
             if (customrecId && fileId) {
 
-                var customRec = record.load({
-                    type: 'customrecord_order_fulfillment_details',
-                    id: customrecId,
-                    isDynamic: false
-                });
+                // var customRec = record.load({
+                //     type: 'customrecord_order_fulfillment_details',
+                //     id: customrecId,
+                //     isDynamic: false
+                // });
 
 
-                customRec.setValue({
-                    fieldId: 'custrecord_jyswms_approved',
-                    value: true
-                });
+                // customRec.setValue({
+                //     fieldId: 'custrecord_jyswms_approved',
+                //     value: true
+                // });
 
-                customRec.setValue({
-                    fieldId: 'custrecord_jyswms_is_partially_fulfilled',
-                    value: true
-                });
+                // customRec.setValue({
+                //     fieldId: 'custrecord_jyswms_is_partially_fulfilled',
+                //     value: true
+                // });
 
-                customRec.setValue({
-                    fieldId: 'custrecord_jyswmws_perform_update',
-                    value: true
-                });
-
-
-                customRec.save({
-                    enableSourcing: false,
-                    ignoreMandatoryFields: true
-                });
-
-                log.error('Custom Record Updated', 'CustomRec ID: ' + customrecId);
-
-                customRec = record.load({
-                    type: 'customrecord_order_fulfillment_details',
-                    id: customrecId,
-                    isDynamic: false
-                });
+                // customRec.setValue({
+                //     fieldId: 'custrecord_jyswmws_perform_update',
+                //     value: true
+                // });
 
 
-                customRec.setValue({
-                    fieldId: 'custrecord_jyswms_approved',
-                    value: true
-                });
+                // customRec.save({
+                //     enableSourcing: false,
+                //     ignoreMandatoryFields: true
+                // });
 
-                customRec.setValue({
-                    fieldId: 'custrecord_jyswms_is_partially_fulfilled',
-                    value: true
-                });
+                // log.error('Custom Record Updated', 'CustomRec ID: ' + customrecId);
 
-                customRec.setValue({
-                    fieldId: 'custrecord_jyswmws_perform_update',
-                    value: true
-                });
+                // customRec = record.load({
+                //     type: 'customrecord_order_fulfillment_details',
+                //     id: customrecId,
+                //     isDynamic: false
+                // });
 
 
-                customRec.save({
-                    enableSourcing: false,
-                    ignoreMandatoryFields: true
-                });
+                // customRec.setValue({
+                //     fieldId: 'custrecord_jyswms_approved',
+                //     value: true
+                // });
 
-                log.error('Custom Record Updated', 'CustomRec ID: ' + customrecId);
+                // customRec.setValue({
+                //     fieldId: 'custrecord_jyswms_is_partially_fulfilled',
+                //     value: true
+                // });
+
+                // customRec.setValue({
+                //     fieldId: 'custrecord_jyswmws_perform_update',
+                //     value: true
+                // });
+
+
+                // customRec.save({
+                //     enableSourcing: false,
+                //     ignoreMandatoryFields: true
+                // });
+try {
+    // log.error('Custom Record Updated', 'CustomRec ID: ' + customrecId);
+                var result = forceFullFillorder.fullFillOrder(salesOrderId);
+} catch (error) {
+  log.error('Custom Record Updated', error.message);
+}
+              
+          
+              
             }
 
 
@@ -6058,6 +6065,8 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             adj.commitLine({ sublistId: 'inventory' });
         });
 
+
+      
         return adj.save();
     }
 
@@ -6325,7 +6334,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
     function getDropShipOrders_helperfunction(context, pageSize, startIndex) {
         try {
             var scriptObj = runtime.getCurrentScript();
-            var headerSearch = search.load({ id: 4797 });
+            var headerSearch = search.load({ id: 4797 }); //4797 // 5052
             var filters = [];
 
             if (context.salesOrderHeaderId) {
@@ -6393,7 +6402,7 @@ define(['N/record', 'N/file', 'N/search', 'N/log', 'N/runtime'], function (recor
             /**
              * Item Search
              */
-            var itemSearch = search.load({ id: 4798 });
+            var itemSearch = search.load({ id: 4798 }); //4798  5023
             if (headerIds.length > 0) {
                 itemSearch.filters.push(search.createFilter({
                     name: "internalid",

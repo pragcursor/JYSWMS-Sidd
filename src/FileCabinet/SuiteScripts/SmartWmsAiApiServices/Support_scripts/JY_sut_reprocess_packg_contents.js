@@ -48,20 +48,24 @@ define([
 
             var trackingArray = [];
 
-            Object.keys(pickMap).forEach(function (itemName) {
+            wmsLines.forEach(function (line) {
 
-                pickMap[itemName].tracking.forEach(function (track) {
+                if (!line.item || line.is_picked !== 'picked') return;
+
+                if (!line.tracking_data) return;
+
+                line.tracking_data.forEach(function (track) {
 
                     trackingArray.push({
-                        trackingNumber: track.trackingNumber,
-                        SSCC: track.SSCC,
-                        itemName: itemName
+                        trackingNumber: track.trackingNumber || '',
+                        SSCC: track.SSCC || '',
+                        itemName: line.item
                     });
 
                 });
 
             });
-
+            
             if (!trackingArray.length) {
                 throw 'No tracking numbers returned from API';
             }

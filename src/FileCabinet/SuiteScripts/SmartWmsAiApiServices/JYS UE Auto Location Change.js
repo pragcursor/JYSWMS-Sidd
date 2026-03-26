@@ -387,7 +387,7 @@ define([
                 //     sendData(responseJson.data);
                 // }    function getDropShipOrders(context, pageSize, startIndex) {
 
-                const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload,1000,0);  //_helperfunction
+                const responseJson = autoLocUtil.getDropShipOrders(payload,1000,0);  //_helperfunction
                 log.error('DUP API RESPONSE for SOID: ' + soId, responseJson);
 
                 if (

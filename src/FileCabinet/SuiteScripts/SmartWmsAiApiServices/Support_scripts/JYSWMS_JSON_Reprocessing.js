@@ -3,9 +3,9 @@
  * @NScriptType Suitelet
  */
 define([
-    'N/ui/serverWidget',
+    'N/ui/serverWidget','N/runtime',
     '../forceFullfillOrders/forceFullFillorder'
-], function (ui, forceFullFillorder) {
+], function (ui, runtime, forceFullFillorder) {
 
     function onRequest(context) {
 
@@ -19,8 +19,10 @@ define([
 
             try {
                 //  Backend processing
+       
                 var result = forceFullFillorder.fullFillOrder(soId);
-               context.response.write('Processing Result: ' + JSON.stringify(result));
+            
+             //  context.response.write('Processing Result: ' + JSON.stringify(result));
                // Reload with SUCCESS message
 
                    //    context.response.write(JSON.stringify(result, null, 2));
