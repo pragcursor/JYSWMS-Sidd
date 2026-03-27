@@ -24,39 +24,10 @@ define(['N/record', 'N/log', 'N/task'], function (record, log, task) {
             var taskId = mrTask.submit();
 
             log.audit('MR Task Submitted', taskId);
-
-            // var processed_socount = 0;
-            // payload.forEach(function (row) {
-            //     try {
-            //         // Adjust this line depending on your payload structure
-            //         var soId = row.internalid || row.soId || row;
-
-            //         if (!soId) {
-            //             log.debug('Missing SO ID', row);
-            //             return;
-            //         }
-
-            //         var soRec = record.load({
-            //             type: record.Type.SALES_ORDER,
-            //             id: Number(soId),
-            //             isDynamic: false
-            //         });
-
-            //         soRec.save({
-            //             enableSourcing: false,
-            //             ignoreMandatoryFields: true
-            //         });
-            //         processed_socount++;
-            //         // log.error('Sales Order processed: ', soId);
-
-            //     } catch (e) {
-            //         log.error('Error processing SO', e);
-            //     }
-
-            // });
-
-         //   log.audit('sopicked_endoftheday: ' + new Date(), processed_socount + ' records processed')
-
+            return {
+                success: true,
+                message: 'Map/Reduce script Triggered'
+            }
         } catch (error) {
             log.error('sopicked_endoftheday fatal error', error);
             return { success: false, message: 'Error processing records', error: error };
