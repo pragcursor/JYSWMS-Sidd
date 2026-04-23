@@ -33,7 +33,21 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
 
             var customerId = newRec.getValue('custrecord_jyswms_customer_frm_so');
-            log.error("customerId", customerId);
+            log.error("customerId  36", customerId);
+
+         if (!customerId) {
+
+    var salesOrderRec = search.lookupFields({
+        id: salesOrderId,
+        type: "salesorder",
+        columns: ['entity']
+    });
+
+    // entity is an array → take first element
+    if (salesOrderRec.entity && salesOrderRec.entity.length > 0) {
+        customerId = salesOrderRec.entity[0].value;
+    }
+}
            
             // if (!ltlCustomer || (customerId !== '1807' && customerId !== '476')) {
             //     log.error("not an amazon order", customerId);

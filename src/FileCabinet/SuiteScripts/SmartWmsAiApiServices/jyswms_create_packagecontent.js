@@ -27,6 +27,8 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
             var canadaCustomerId = newRec.getValue({ fieldId: 'custrecord_jyswms_customer_frm_so' });
 
+          log.error("canadacusotmerid",canadaCustomerId);
+
             var status = newRec.getValue('custrecord_jyswms_order_status');
 
             // if (status == '18' || status == '17') {

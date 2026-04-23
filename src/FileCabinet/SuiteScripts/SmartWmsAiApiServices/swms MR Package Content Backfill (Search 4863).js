@@ -8,7 +8,7 @@ define(['N/record', 'N/search', 'N/log'], (record, search, log) => {
     const getInputData = () => {
         return {
             type: 'search',
-            id: '4863'
+            id: '5113'  // earlier it is 4863
         };
 
     };

@@ -2,7 +2,7 @@
  * @NApiVersion 2.1
  * @NModuleScope Public
  */
-define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
+define(['N/record', 'N/log', 'N/search', 'N/format'], function (record, log, search, format) {
 
     /* =========================
        ENTRY POINT
@@ -105,7 +105,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 });
 
                 var payloadItem = payloadItems.find(function (p) {
-                 //   return Number(p.itemInternalId) === Number(itemId);
+                    //   return Number(p.itemInternalId) === Number(itemId);
                     return Number(p.uniqueId) == Number(lineuniqId);
                 });
 
@@ -158,7 +158,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
         } catch (e) {
             log.error('RMA Creation Error', e);
-           // throw new Error('RMA_CREATION_FAILED: ' + e.message);
+            // throw new Error('RMA_CREATION_FAILED: ' + e.message);
         }
     }
 
@@ -191,7 +191,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                 });
 
                 var payloadItem = payloadItems.find(function (p) {
-                     return Number(p.itemInternalId) === Number(itemId);
+                    return Number(p.itemInternalId) === Number(itemId);
                     // if (lineuniqId == p.uniqueId) {
                     //     log.error('lineuniqId', lineuniqId)
                     //     log.error('p.uniqueId', p.uniqueId)
@@ -272,7 +272,7 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
 
         } catch (e) {
             log.error('Item Receipt Creation Error', e);
-           // throw new Error('ITEM_RECEIPT_CREATION_FAILED: ' + e.message);
+            // throw new Error('ITEM_RECEIPT_CREATION_FAILED: ' + e.message);
         }
     }
 
@@ -329,39 +329,59 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
             var ponum = payload.poNumber;
             var customerName = payload.customerName;
             var itemName = payload.itemName;
-            var shipzip = payload.shipzip;
+            var shipzip = payload.shipzip || payload.shipZip;
+            shipzip = shipzip ? String(shipzip) : null;
             if (!soNum && !ponum && !customerName && !itemName && !shipzip) {
                 return {
                     success: false,
                     message: 'At least one search criteria (soNumber, poNumber, customerName, itemName, shipzip) must be provided.'
                 };
             }
+
+            const today = new Date();
+            const twelveMonthsAgo = new Date();
+            twelveMonthsAgo.setMonth(today.getMonth() - 12);
+
+            // Format to NetSuite (MM/DD/YYYY)
+            function formatDate(date) {
+                return (date.getMonth() + 1) + '/' + date.getDate() + '/' + date.getFullYear();
+            }
+
+            const startDate = formatDate(twelveMonthsAgo);
+            const endDate = formatDate(today);
+
             var filters = [
                 ["type", "anyof", "SalesOrd"], "AND",
                 ["mainline", "is", "F"], "AND",
                 ["taxline", "is", "F"], "AND",
-                ["shipping", "is", "F"]
+                ["shipping", "is", "F"], "AND",
+                ["shipdate", "within", startDate, endDate],
+                // ["shipdate", "within", "previousonemonth"], // i want last 60 days
+
             ];
 
             if (soNum) {
                 filters.push("AND", ["tranid", "is", soNum]);
-            } else if (ponum) {
-                filters.push("AND", ["otherrefnum", "equalto", ponum]);
-            } else if (customerName) {
-                filters.push("AND", ["customer.entityid", "haskeywords", customerName]);
-            } else if (itemName) {
-                filters.push("AND", ["item.name", "is", itemName]);
-                filters.push("AND", ["shipdate", "onorbefore", "monthbeforelasttodate"]);
-            } else if (shipzip) {
-                filters.push("AND", ["shipzip", "is", shipzip]);
-                filters.push("AND", ["shipdate", "onorbefore", "monthbeforelasttodate"]);
             }
-            log.error('Search Filters', filters);
+            if (ponum) {
+                filters.push("AND", ["otherrefnum", "equalto", ponum]);
+            }
+            if (customerName) {
+                filters.push("AND", ["customer.entityid", "haskeywords", customerName]);
+            }
+            if (itemName) {
+                filters.push("AND", ["item.name", "is", itemName]);
+            }
+            if (shipzip) {
+                filters.push("AND", ["shipzip", "is", shipzip]);
+            }
+
+            // log.error('Search Filters', filters);
             var salesorderSearchObj = search.create({
                 type: "salesorder",
                 filters: filters,
                 columns: [
-                    search.createColumn({ name: "internalid" }),          // SO ID
+                    search.createColumn({ name: "internalid", sort: search.Sort.DESC }),          // SO ID
                     search.createColumn({ name: "tranid" }),              // SO Number
                     search.createColumn({ name: "otherrefnum" }),         // PO
                     search.createColumn({ name: "entityid", join: "customer" }),
@@ -369,13 +389,18 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                     search.createColumn({ name: "item" }),
                     search.createColumn({ name: "quantity" }),
                     search.createColumn({ name: "custcol_jyswms_picked_qty" }),
-                    search.createColumn({ name: "lineuniquekey" })
+                    search.createColumn({ name: "lineuniquekey" }),
+                    search.createColumn({ name: "shipzip" }),
+                    search.createColumn({ name: "shipdate" }),
+                    search.createColumn({ name: "shipstate" }),
+                    search.createColumn({ name: "shipaddressee" }),
+
                 ]
             });
 
             var resultSet = salesorderSearchObj.run();
             var firstResult = resultSet.getRange({ start: 0, end: 1 });
-            log.error('First Search Result', firstResult);
+            //  log.error('First Search Result', firstResult);
             if (!firstResult || firstResult.length === 0) {
                 return {
                     success: false,
@@ -397,6 +422,10 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
                         poNumber: result.getValue({ name: "otherrefnum" }),
                         customerName: result.getValue({ name: "entityid", join: "customer" }),
                         customerId: result.getValue({ name: "internalid", join: "customer" }),
+                        shipzip: result.getValue({ name: "shipzip" }),
+                        shipstate: result.getValue({ name: "shipstate" }),
+                        shipaddressee: result.getValue({ name: "shipaddressee" }),
+                        dateofpurchase: result.getValue({ name: "shipdate" }),
                         items: []
                     };
                 }

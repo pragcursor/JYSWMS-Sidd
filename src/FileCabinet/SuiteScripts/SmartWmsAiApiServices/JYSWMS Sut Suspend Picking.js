@@ -1,141 +1,179 @@
 /**
- * @NApiVersion 2.x
+ * @NApiVersion 2.1
  * @NScriptType Suitelet
  */
 define(['N/record', 'N/https', 'N/log'],
-    function (record, https, log) {
+	function (record, https, log) {
 
-        function onRequest(context) {
+		function onRequest(context) {
 
-            if (context.request.method !== 'POST') {
-                context.response.write('Invalid request');
-                return;
-            }
+			if (context.request.method !== 'POST') {
+				context.response.write('Invalid request');
+				return;
+			}
 
-            try {
-                var body = JSON.parse(context.request.body);
+			try {
+				var body = JSON.parse(context.request.body);
 
-                var sales_id = body.salesOrderId;     // Sales Order ID
-                var suspended = body.suspendPicking; // true / false
-                var shipVia = body.shipVia;           // Shipping Method (optional, can be used for additional logic if needed)
-                var entityType = 'salesorder';
+				var sales_id = body.salesOrderId;     // Sales Order ID
+				var suspended = body.suspendPicking; // true / false
+				var shipVia = body.shipVia;           // Shipping Method (optional, can be used for additional logic if needed)
+				var entityType = 'salesorder';
 
-                if (!sales_id) {
-                    throw 'Missing Sales Order ID';
-                }
-                log.audit('Received Request', 'Sales Order ID: ' + sales_id + ', Suspend: ' + suspended + ', Ship Via: ' + shipVia);
+				if (!sales_id) {
+					throw 'Missing Sales Order ID';
+				}
+				log.audit('Received Request', 'Sales Order ID: ' + sales_id + ', Suspend: ' + suspended + ', Ship Via: ' + shipVia);
 
-                if (shipVia != 57733) {
-                    // 1. Call external API FIRST
-                    var apiResult = sendData(sales_id, entityType, suspended);
+				if (shipVia != 57733) {
+					// 1. Call external API FIRST
+					var apiResult = sendData(sales_id, entityType, suspended);
 
-                    if (!apiResult.success) {
-                        throw apiResult.error || apiResult.response || 'API call failed';
-                    }
-                }
-                // 2. Update Sales Order ONLY after API success
-                // var soRec = record.load({
-                //     type: record.Type.SALES_ORDER,
-                //     id: sales_id
-                // });
+					// if (!apiResult.success) {
+					// 	throw apiResult.error || apiResult.response || 'API call failed';
+					// }
+					if (!apiResult.success) {
 
-                // soRec.setValue({
-                //     fieldId: 'custbody_jyswms_suspend_picking',
-                //     value: suspended
-                // });
+						var detail = apiResult.body?.detail || '';
 
-                // soRec.save({
-                //     ignoreMandatoryFields: true
-                // });
-                var so_sub = record.submitFields({
-                    type: record.Type.SALES_ORDER,
-                    id: sales_id,
-                    values: {
-                        custbody_jyswms_suspend_picking: suspended
-                    },
-                    options: {
-                        enableSourcing: false,
-                        ignoreMandatoryFields: true
-                    }
-                });
-                log.audit('Suspend/Resume Picking Success', 'Sales Order ID: ' + sales_id + ', Suspended: ' + suspended);
-                context.response.write(JSON.stringify({
-                    success: true
-                }));
+						//var allowedError = detail.includes('No sales order found for the given internal_id');
+						var allowedError = (detail.toLowerCase()).includes('no sales order found');
+						if (!allowedError) {
+							throw detail || apiResult.error || 'API call failed';
+						}
 
-            } catch (e) {
-                log.error('Suspend/Resume Picking Failed', e);
+						// else → allowed failure → continue execution
+					}
+				}
+				// 2. Update Sales Order ONLY after API success
 
-                context.response.write(JSON.stringify({
-                    success: false,
-                    message: e.toString()
-                }));
-            }
-        }
+				var so_sub = record.submitFields({
+					type: record.Type.SALES_ORDER,
+					id: sales_id,
+					values: {
+						custbody_jyswms_suspend_picking: suspended
+					},
+					options: {
+						enableSourcing: false,
+						ignoreMandatoryFields: true
+					}
+				});
+				log.audit('Suspend/Resume Picking Success', 'Sales Order ID: ' + sales_id + ', Suspended: ' + suspended);
+				context.response.write(JSON.stringify({
+					success: true
+				}));
 
-        /* ===================== API HELPERS ===================== */
+			} catch (e) {
+				log.error('Suspend/Resume Picking Failed', e);
 
-        function sendData(entityId, entityType, suspended) {
-            var token = generateToken();
-            if (!token) {
-                return { success: false, error: 'Token generation failed' };
-            }
+				context.response.write(JSON.stringify({
+					success: false,
+					message: e.toString()
+				}));
+			}
+		}
 
-            try {
-                var response = https.post({
-                    url: 'https://api.jyswms.com/dropship-suspend?so_id=' + entityId,
-                    headers: {
-                        'Authorization': 'Bearer ' + token,
-                        'Content-Type': 'application/json'
-                    }
-                    // Body intentionally omitted as per your implementation
-                });
+		/* ===================== API HELPERS ===================== */
 
-                return {
-                    success: response.code === 200,
-                    response: response.body || ''
-                };
+		// function sendData(entityId, entityType, suspended) {
+		//     var token = generateToken();
+		//     if (!token) {
+		//         return { success: false, error: 'Token generation failed' };
+		//     }
 
-            } catch (e) {
-                log.error('sendData Error', e);
-                return {
-                    success: false,
-                    error: e.message || e.toString()
-                };
-            }
-        }
+		//     try {
+		//         var response = https.post({
+		//            // url: 'https://api.jyswms.com/dropship-suspend?so_id=' + entityId,
+		//            url: 'https://api.jyswms.com/dropship-suspend?so_id=' + entityId + '&suspended=' + suspended,
+		//             headers: {
+		//                 'Authorization': 'Bearer ' + token,
+		//                 'Content-Type': 'application/json'
+		//             }
+		//             // Body intentionally omitted as per your implementation
+		//         });
 
-        /** Authenticates & returns access token */
-        function generateToken() {
-            const url = 'https://api.jyswms.com/user/login';
-            const creds = {
-                userid: 'jyswms_integration_user',
-                password: 's9u[7zC720%pZr'
-            };
+		//         return {
+		//             success: response.code === 200,
+		//             response: response.body || ''
+		//         };
 
-            try {
-                const response = https.post({
-                    url: url,
-                    body: JSON.stringify(creds),
-                    headers: { 'Content-Type': 'application/json' }
-                });
+		//     } catch (e) {
+		//         log.error('sendData Error', e);
+		//         return {
+		//             success: false,
+		//             error: e.message || e.toString()
+		//         };
+		//     }
+		// }
 
-                const parsed = JSON.parse(response.body || '{}');
+		function sendData(entityId, entityType, suspended) {
+			var token = generateToken();
+			if (!token) {
+				return { success: false, error: 'Token generation failed' };
+			}
 
-                if (parsed.access_token) {
-                    return parsed.access_token;
-                }
+			try {
+				var response = https.post({
+					url: 'https://api.jyswms.com/dropship-suspend?so_id=' + entityId + '&suspended=' + suspended,
+					headers: {
+						'Authorization': 'Bearer ' + token,
+						'Content-Type': 'application/json'
+					}
+				});
 
-               // log.error('Token Generation Failed', parsed);
-                return null;
+				var body = {};
+				try {
+					body = JSON.parse(response.body || '{}');
+				} catch (e) {
+					body = { raw: response.body };
+				}
 
-            } catch (e) {
-                log.error('generateToken Error', e.message);
-                return null;
-            }
-        }
+				return {
+					success: response.code === 200,
+					code: response.code,
+					body: body
+				};
 
-        return {
-            onRequest: onRequest
-        };
-    });
+			} catch (e) {
+				log.error('sendData Error', e);
+				return {
+					success: false,
+					error: e.message || e.toString()
+				};
+			}
+		}
+
+		/** Authenticates & returns access token */
+		function generateToken() {
+			const url = 'https://api.jyswms.com/user/login';
+			const creds = {
+				userid: 'jyswms_integration_user',
+				password: 's9u[7zC720%pZr'
+			};
+
+			try {
+				const response = https.post({
+					url: url,
+					body: JSON.stringify(creds),
+					headers: { 'Content-Type': 'application/json' }
+				});
+
+				const parsed = JSON.parse(response.body || '{}');
+
+				if (parsed.access_token) {
+					return parsed.access_token;
+				}
+
+				// log.error('Token Generation Failed', parsed);
+				return null;
+
+			} catch (e) {
+				log.error('generateToken Error', e.message);
+				return null;
+			}
+		}
+
+		return {
+			onRequest: onRequest
+		};
+	});

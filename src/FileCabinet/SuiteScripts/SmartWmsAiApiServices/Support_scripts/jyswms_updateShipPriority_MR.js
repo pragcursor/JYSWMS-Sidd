@@ -125,17 +125,18 @@ define(['N/search', 'N/log', 'N/file','N/https'], function (search, log, file,ht
                     },
                     body: jsonString
                 });
+                var finalJSON=JSON.parse(response.body)
 
                 log.error({
                     title: 'ship_priority_data_' + savedSearchId + '_' + new Date().getTime() + '.json',
-                    details: 'total_rows_updated='+response.body.total_rows_updated+',internal Id :'+ response.body
+                    details: 'total_rows_updated= '+finalJSON.total_rows_updated+' ,internal Id :'+ response.body
                 });
               }
 
             } catch (e) {
 
                 log.error({
-                    title: 'File Creation Error',
+                    title: 'Error Search='+savedSearchId,
                     details: e
                 });
 

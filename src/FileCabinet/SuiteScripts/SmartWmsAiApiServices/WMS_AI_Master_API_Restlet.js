@@ -12,9 +12,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
     './Tracking/trackingUtils',
     './Returns/returnUtils',
     './partsPicking/partsPickedUtil',
-    './markAsPicked/markAsPickedUtil'
+    './markAsPicked/markAsPickedUtil',
+    './Orders/InventoryApproval',
+    './cleaningup_functions/JYS_unused_functions'
 ], function (file, record, error, log, https, search, runtime, binUtils, orderUtils, jySoPickedStatsEOD, itemUtils,
-    inventoryUtils, locationUtils, trackingUtils, returnUtils, partsPickedUtil, markAsPickedUtil) {
+    inventoryUtils, locationUtils, trackingUtils, returnUtils, partsPickedUtil, markAsPickedUtil, inventoryApprovalUtil, unused_functions) {
 
     function get(context) {
         try {
@@ -34,7 +36,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             if (!action) {
                 return {
                     status: 400,
-                    message: "Action is required in URL parameters"
+                    message: "Action is required in URL parameters -- GET"
                 };
             }
             //  let relatedTransactionIds = [];
@@ -47,13 +49,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             var startIndex = (pageNumber - 1) * pageSize;
 
             switch (action) {
+                case 'get_unapproved_adjustments':
+                    return inventoryApprovalUtil.getUnapprovedAdjustments(context);
                 case 'get_oldBinTransfers':
-                    return getOldBinTransfers(context);
+                    return inventoryApprovalUtil.getOldBinTransfers(context);
                 case 'get_oldUnpickedOrders':
-                    return getOldUnpickedOrders(context);
+                    return inventoryApprovalUtil.getOldUnpickedOrders(context);
                 case 'get_unSyncedOrders':
                     return getUnSyncedOrders(context);
-
                 case 'get_orders':
                     return orderUtils.getOrdersOptimized(context, pageSize, startIndex);
                 case 'get_so_for_return':
@@ -68,6 +71,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     return orderUtils.getAmzlOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
                     return orderUtils.getDropShipOrders_helperfunction(context, pageSize, startIndex); //orderUtils.getDropShipOrders(context, pageSize, startIndex);
+                // case 'get_dropShipOrders':
+                //     return orderUtils.getDropShipOrders_helperfunctionGtOrders(context, pageSize, startIndex); 
+                case 'getDropShipOrders_helperfunctionGtOrders':
+                    return orderUtils.getDropShipOrders_helperfunctionGtOrders(context, pageSize, startIndex);
                 case 'get_partaillDropShipOrders':
                     return orderUtils.getDropShipOrders_partials(context, pageSize, startIndex);
                 case 'getDropShipOrdersPerOrder':
@@ -99,7 +106,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'get_allSalesOrders':
                     return getAllSalesOrders(context);
                 case 'get_users':
-                    return getUsers(context, pageSize, startIndex);
+                    return unused_functions.getUsers(context, pageSize, startIndex);
                 case 'get_shippingLineData':
                     return trackingUtils.getShippingLineData(context, pageSize, startIndex);
                 case 'get_inventory':
@@ -142,124 +149,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-    function getOldBinTransfers(context) {
-        try {
-            var oldBinTransfers = [];
-            const binTransferSearchObj = search.create({
-                type: "bintransfer",
-                filters:
-                    [
-                        ["type", "anyof", "BinTrnfr"],
-                        "AND",
-                        ["custbodybulk_picking_processed", "is", "F"],
-                        "AND",
-                        ["mainline", "is", "T"],
-                        "AND",
-                        ["location", "anyof", "15", "9"],
-                        "AND",
-                        ["custbody_wms_bulk_picking_processed", "is", "F"],
-                        "AND",
-                        ["custbody_wms_mobile_trans_created_by", "anyof", "@NONE@"],
-                        "AND",
-                        ["custbody_realted_sales_order.status", "noneof", "SalesOrd:C", "SalesOrd:G", "SalesOrd:H"],
-                        "AND",
-                        ["custbody_realted_sales_order.mainline", "is", "T"],
-                        "AND",
-                        ["custbody_do_not_batch_bt", "is", "F"],
-                        "AND",
-                        ["custbody_realted_sales_order.custbody_wms_donotpick_so", "is", "F"],
-                        "AND",
-                        ["custbody_realted_sales_order.custbody_bulk_picking_rec", "anyof", "@NONE@"]
-                    ],
-                columns:
-                    [
-                        search.createColumn({
-                            name: "internalid",
-                            summary: "GROUP",
-                            label: "Internal ID"
-                        })
-                    ]
-            });
-            const searchResultCount = binTransferSearchObj.runPaged().count;
-            log.error("binTransferSearchObj result count", searchResultCount);
-            binTransferSearchObj.run().each(function (result) {
-                oldBinTransfers.push(result.getValue({
-                    name: "internalid",
-                    summary: "GROUP",
-                }));
-                return true;
-            });
-
-            return {
-                status: 200,
-                message: "Old Bin Transfers retrieved successfully",
-                data: oldBinTransfers
-            };
-        } catch (e) {
-            log.error("Error in getOldBinTransfers function", e);
-            return false;
-        }
-    }
-
-    // get old bin transfers
-    /**
-     * Get old bin transfers
-     * @param {Object} context - The context object
-     * @returns {Object} - The response object
-     */
-    // get old unpicked orders
-    function getOldUnpickedOrders(context) {
-        try {
-            var oldUnpickedOrders = [];
-            const salesorderSearchObj = search.create({
-                type: "salesorder",
-                filters:
-                    [
-                        ["type", "anyof", "SalesOrd"],
-                        "AND",
-                        ["mainline", "is", "T"],
-                        "AND",
-                        ["custbody_jys_enabled_customer", "is", "F"],
-                        "AND",
-                        ["status", "anyof", "SalesOrd:A", "SalesOrd:B"],
-                        "AND",
-                        ["custbody_bulk_picking_rec", "anyof", "@NONE@"]
-                    ],
-                columns:
-                    [
-                        search.createColumn({
-                            name: "internalid",
-                            summary: "GROUP",
-                            label: "Internal ID"
-                        })
-                    ]
-            });
-            const searchResultCount = salesorderSearchObj.runPaged().count;
-            log.debug("salesorderSearchObj result count", searchResultCount);
-            salesorderSearchObj.run().each(function (result) {
-                oldUnpickedOrders.push(result.getValue({
-                    name: "internalid",
-                    summary: "GROUP",
-                }));
-                // .run().each has a limit of 4,000 results
-                return true;
-            });
-
-            return {
-                status: 200,
-                message: "Old Unpicked Orders retrieved successfully",
-                data: oldUnpickedOrders
-            };
-        } catch (e) {
-            log.error("Error in getOldUnpickedOrders function", e);
-            return {
-                status: 500,
-                message: e.message
-            };
-        }
-    }
-
-    // get unsynced orders
+    // get unsynced orders check 
     /**
      * Get unsynced orders
      * @param {Object} context - The context object
@@ -268,35 +158,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
     function getUnSyncedOrders(context) {
         try {
             var unsyncedOrders = [];
-            /*    const salesorderSearchObj = search.create({
-                    type: "salesorder",
-                    filters:
-                        [
-                            ["type", "anyof", "SalesOrd"],
-                            "AND",
-                            ["mainline", "is", "F"],
-                            "AND",
-                            ["custbody_jys_enabled_customer", "is", "T"],
-                            "AND",
-                            ["custcol_jyswms_picked_qty", "isempty", ""],
-                            "AND",
-                            ["status", "anyof", "SalesOrd:B"],
-                            "AND",
-                            ["shipmethod", "noneof", "57733"],
-                            "AND",
-                            ["taxline", "is", "F"],
-                            "AND",
-                            ["shipping", "is", "F"]
-                        ],
-                    columns:
-                        [
-                            search.createColumn({
-                                name: "internalid",
-                                summary: "GROUP",
-                                label: "Internal ID"
-                            })
-                        ]
-                });*/
 
             var salesorderSearchObj = search.load({ id: 5036 });
             const searchResultCount = salesorderSearchObj.runPaged().count;
@@ -357,248 +218,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         } catch (e) {
             log.error("Error in updateUnSyncedOrders function", e);
             return false;
-        }
-    }
-
-    /**
-   * Optimized version of your getOrders function.
-   * - Option A uniqueness: one entry per item_internalid + "_" + binId
-   * - Parses columns only once per item row
-   * - Merges base item data with bin rows from getBinTransferinfo()
-   */
-
-    function getOrdersOptimized(context, pageSize, startIndex) {
-        try {
-            var scriptStartTime = new Date().getTime();
-            var scriptObj = runtime.getCurrentScript();
-            var SalesOrderHeaderId = scriptObj.getParameter({ name: 'custscript_wms_ai_salesorder_header' });
-            var SalesOrderItemLevelDataId = scriptObj.getParameter({ name: 'custscript_wms_ai_salesorder_items' });
-
-            var pickedItemUniqueIds = getPickedItemUniqueIds();
-            var pickedItemUniqueIdsMap = getPickedItemUniqueIdsMap();
-
-            var itemPrimaryUnitsMap = itemPrimaryUnits();
-
-            var headerData = {};
-            var filters = [];
-
-            if (context.customer_id) {
-                filters.push(['entity', 'anyof', context.customer_id]);
-            }
-            if (context.start_date && context.end_date) {
-                filters.push('AND', ['trandate', 'within', context.start_date, context.end_date]);
-            }
-
-            // Load header search and apply additional filters
-            var headerSearch = search.load({ id: 4761 });
-            if (filters.length > 0) {
-                headerSearch.filters = (headerSearch.filters || []).concat(filters);
-            }
-
-            var totalCount = headerSearch.runPaged().count;
-            var totalPages = Math.ceil(totalCount / pageSize);
-
-            var searchResult = headerSearch.run();
-            var searchRange = searchResult.getRange({ start: startIndex, end: startIndex + pageSize });
-            var headerIds = [];
-
-            // Build headerData map (parse columns once per header row)
-            searchRange.forEach(function (result) {
-                var internalID = result.getValue({ name: 'internalid' });
-                if (internalID) headerIds.push(internalID);
-
-                var recordData = {};
-                result.columns.forEach(function (column) {
-                    var columnName = toSnakeCase(column.label || column.name);
-                    recordData[columnName] = result.getText(column) || result.getValue(column);
-                });
-
-                headerData[internalID] = recordData;
-            });
-
-            // If you want to prefetch bin transfers for all headers, implement getBinTransferData(headerIds)
-            // var getBinTransfers = headerIds.length > 0 ? getBinTransferData(headerIds) : {};
-
-            // Load item-level search and apply filters
-            var itemSearch = search.load({ id: SalesOrderItemLevelDataId });
-            if (filters.length > 0) {
-                itemSearch.filters = (itemSearch.filters || []).concat(filters);
-            }
-
-            var cartonsIds = {}; // carton counter per internalID
-            var itemSearchResult = itemSearch.run();
-            var itemSearchRange = itemSearchResult.getRange({ start: startIndex, end: startIndex + pageSize });
-
-            // Helper: safe parse int
-            function safeInt(v, fallback) {
-                var n = parseInt(v);
-                return (isNaN(n) ? (fallback === undefined ? "" : fallback) : n);
-            }
-            function safeFloat(v, fallback) {
-                var n = parseFloat(v);
-                return (isNaN(n) ? (fallback === undefined ? "" : fallback) : n);
-            }
-
-            itemSearchRange.forEach(function (result) {
-                var internalID = result.id;
-                if (!internalID) return;
-
-                // init carton counter
-                if (!cartonsIds[internalID]) cartonsIds[internalID] = 1;
-
-                // ensure header row exists
-                if (!headerData[internalID]) return;
-                if (!headerData[internalID].itemDetails) headerData[internalID].itemDetails = [];
-
-                // Parse item-level columns ONCE and build baseItemData
-                var baseItemData = {};
-                var so_items_str = "";
-                var parsedSoItemsArr = [];
-                var lineQuantityRaw = 0;
-                var item_internalid = result.getValue({ name: 'item' }); // keep item internal id
-                var unique_id_val = ""; // keep original unique_id (if present)
-
-                result.columns.forEach(function (column) {
-                    var columnName = toSnakeCase(column.label || column.name);
-                    var valueText = result.getText(column) || result.getValue(column);
-
-                    // capture the raw quantity column separately (we'll use it for carton calc / conversions)
-                    if (columnName === "quantity") {
-                        lineQuantityRaw = parseInt(valueText) || 0;
-                    }
-
-                    if (columnName === "so_items") {
-                        so_items_str = valueText || "";
-                        if (so_items_str) {
-                            var arr = so_items_str.split(";").map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
-                            parsedSoItemsArr = arr;
-                        }
-                        baseItemData["so_items"] = so_items_str;
-                    } else if (columnName === "unique_id") {
-                        unique_id_val = valueText || "";
-                        // do not write to baseItemData.unique_id here — the final unique_id will be appended with binIndex later
-                        baseItemData["unique_id"] = valueText || "";
-                    } else {
-                        baseItemData[columnName] = valueText;
-                    }
-                });
-
-                // Primary Unit Conversion applied once to lineQuantityRaw
-                var convertedLineQuantity = lineQuantityRaw;
-                if (itemPrimaryUnitsMap && itemPrimaryUnitsMap[item_internalid]) {
-                    var itemObj = itemPrimaryUnitsMap[item_internalid];
-                    var rate = parseInt(itemObj?.rate || 1);
-                    if (rate > 0) convertedLineQuantity = Math.floor(lineQuantityRaw / rate);
-                }
-
-                // Prepare cartonInfo base properties used per bin
-                var itemslength = parsedSoItemsArr.length || 0;
-
-                // Get bin rows for this item/result — helper returns an ARRAY (guaranteed)
-                var existBinArr = getBinTransferinfo(result); // always array
-
-                // Safety: ensure it's an array
-                if (!Array.isArray(existBinArr) || existBinArr.length === 0) {
-                    existBinArr = [{
-                        internalId: "",
-                        binId: "",
-                        binNumber: "",
-                        relatedSalesOrder: "",
-                        item: "",
-                        quantity: "",
-                        binIndex: ""
-                    }];
-                }
-
-                // ensure header-level tracking for uniqueness
-                if (!headerData[internalID]._addedKeys) headerData[internalID]._addedKeys = {};
-
-                // For each bin row, build a final itemData by merging baseItemData and bin-specific fields
-                for (var b = 0; b < existBinArr.length; b++) {
-                    var binObj = existBinArr[b] || {};
-
-                    // Use Option A uniqueness: item_internalid + "_" + binId
-                    var uniqueKey = (item_internalid || "") + "_" + (binObj.binId || "");
-
-                    // Skip if already added for this item+bin
-                    if (headerData[internalID]._addedKeys[uniqueKey]) {
-                        continue;
-                    }
-
-                    // Mark as added
-                    headerData[internalID]._addedKeys[uniqueKey] = true;
-
-                    // Determine number of cartons (car)
-                    var car = safeInt(binObj.quantity, 0);
-                    if (!car || car <= 0) {
-                        car = convertedLineQuantity || 0;
-                    }
-
-                    // Build cartonInfo array
-                    var cartonInfo = [];
-                    for (var ci = 0; ci < (car || 0); ci++) {
-                        var num = cartonsIds[internalID];
-                        var carton = num + " of " + (itemslength || 0);
-                        cartonInfo.push(carton);
-                        cartonsIds[internalID] = num + 1;
-                    }
-
-                    // Build final merged itemData (clone baseItemData -> override/add bin fields)
-                    var itemData = Object.assign({}, baseItemData);
-
-                    // Set unique_id to include bin index so it stays unique per bin if base had unique_id
-                    var uniqueIdToSet = (unique_id_val ? unique_id_val + "_" + (binObj.binIndex || (b + 1)) : (item_internalid + "_" + (binObj.binIndex || (b + 1))));
-                    itemData["unique_id"] = uniqueIdToSet;
-
-                    // Bin-specific fields (guaranteed keys with empty fallback)
-                    itemData["cartonInfo"] = cartonInfo;
-                    itemData["quantity"] = safeInt(binObj.quantity, ""); // quantity to pick from this bin (number or "")
-                    itemData["bin_id"] = safeInt(binObj.binId, "");
-                    itemData["bin_index"] = safeInt(binObj.binIndex, "");
-                    // Preserve bin name as text (do not parseInt)
-                    itemData["bin_name"] = (binObj.binNumber === "" ? "" : binObj.binNumber || "");
-                    itemData["bin_transfer_internalid"] = (binObj.internalId === "" ? "" : binObj.internalId || "");
-                    itemData["item_quantity"] = convertedLineQuantity; // total item qty (after unit conversion)
-                    // Keep or override other commonly expected fields from headerData (optional)
-                    // e.g., transaction_id, name, location, ship_date, etc are already present in baseItemData or headerData
-
-                    // Some additional derived fields you had before
-                    // asin_type_TEST logic (reuse parsedSoItemsArr)
-                    if (parsedSoItemsArr.length === 1) {
-                        var amazonId = result.getText({ name: "custitem129", join: "item" }) || result.getValue({ name: "custitem129", join: "item" });
-                        itemData["asin_type_TEST"] = "SINGLE ASIN -" + (amazonId || "");
-                    } else {
-                        itemData["asin_type_TEST"] = "MIXED SKU";
-                    }
-
-                    // push into headerData items
-                    headerData[internalID].itemDetails.push(itemData);
-                } // end bin loop
-            }); // end itemSearchRange.forEach
-
-            return {
-                status: 200,
-                message: 'Data retrieved successfully',
-                summary: {
-                    total_records: totalCount,
-                    total_pages: totalPages,
-                    records_per_page: pageSize,
-                    current_page: Math.floor(startIndex / pageSize) + 1,
-                    pagination_info: {
-                        start_index: startIndex,
-                        end_index: startIndex + pageSize - 1,
-                        has_next_page: (startIndex + pageSize) < totalCount,
-                        has_previous_page: startIndex > 0
-                    }
-                },
-                data: headerData
-            };
-        } catch (e) {
-            log.error("Error in getOrdersOptimized function", e);
-            return {
-                status: 500,
-                message: e.message
-            };
         }
     }
 
@@ -744,11 +363,12 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             var soSearch = search.load({ id: 4810 });
 
             var pageSize = 1000;
-            var pageNumber = request.page ? parseInt(request.page, 10) : 1;
-
+            //  var pageNumber = request.page ? parseInt(request.page, 10) : 1;
+            var pageNumber = request.page_number ? parseInt(request.page_number, 10) : 1;
             var pagedData = soSearch.runPaged({ pageSize: pageSize });
             var totalPages = pagedData.pageRanges.length;
             var totalRecords = pagedData.count;
+            // log.error('pageNumber',pageNumber)
 
             if (pageNumber < 1 || pageNumber > totalPages) {
                 return {
@@ -805,14 +425,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 error: e.message
             };
         }
-    }
-
-    function toSnakeCase(str) {
-        return str
-            .toLowerCase()
-            .trim()
-            .replace(/[^\w\s]/g, '')   // remove special chars
-            .replace(/\s+/g, '_');     // spaces → underscore
     }
 
     // Cleaned / unchanged helper — returns ARRAY of bin rows (guaranteed)
@@ -913,7 +525,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             if (!action) {
                 return {
                     status: 400,
-                    message: "Action is required in URL parameters"
+                    message: "Action is required in URL parameters -- POST"
                 };
             }
             var isExistsResp = ""
@@ -1010,8 +622,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'updateUnSyncedOrders':
                     recType = 'unSynced Orders';
                     break;
-                case 'fullfillOrders':
-                    recType = 'Item Fulfillment';
+                case 'inventoryManagerApproved':
+                    recType = 'Inventory Adjustment';
                     break;
                 case 'binCount':
                     recType = 'Inventory Adjustment';
@@ -1052,6 +664,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'itemnotpicked_invchecked':
                     recType = 'inv_item_not_picked';
                     break;
+                case 'amzlShipMethodChange':
+                    recType = 'amzlShipMethodChange';
+                    break;
                 default:
                     return {
                         status: 400,
@@ -1074,7 +689,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         value: context.portalId
                     });
                 }
-                var excludeActions_portalId = ["itemnotpicked_invchecked", "sopicked_endoftheday", "updateUnSyncedOrders"];
+                var excludeActions_portalId = ["itemnotpicked_invchecked", "sopicked_endoftheday", "updateUnSyncedOrders", "amzlShipMethodChange"];
                 if (excludeActions_portalId.indexOf(context.action) === -1) {
                     if (context.portalId == null || context.portalId === '' || context.portalId === undefined) {
                         return {
@@ -1121,19 +736,47 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     value: context.userName || context.username
                 });
 
-                if (context.location) {
+                // if (context.location) {
 
+                //     var locationId = context.location;
+
+                //     if (context.location) {
+                //         rec.setValue({
+                //             fieldId: 'custrecord_wms_ai_api_custrec_location',
+                //             value: parseInt(context.location)
+                //         });
+                //     }
+
+                // }
+
+                if (context.location) {
                     var locationId = context.location;
-                    if (locationId == "15" || locationId == " L60-Hardeeville_SC") {
-                        locationId = 15;
+
+                    // Map of location name -> internal ID (from NetSuite Locations list)
+                    var locationNameToId = {
+                        "Flemington L41": 9,
+                        "FTZ-L74-Perris_CA": 24,
+                        "L60-Hardeeville_SC": 15,
+                        "L74-Perris_CA": 23,
+                    };
+
+                    var parsedId = parseInt(locationId, 10);
+
+                    if (!isNaN(parsedId) && parsedId > 0) {
+                        // Already a numeric internal ID (e.g. "9", "15", "23", "24")
+                        rec.setValue({
+                            fieldId: 'custrecord_wms_ai_api_custrec_location',
+                            value: parsedId
+                        });
+                    } else if (locationNameToId[locationId]) {
+                        // Location name string (e.g. "Flemington L41") → resolve to internal ID
+                        rec.setValue({
+                            fieldId: 'custrecord_wms_ai_api_custrec_location',
+                            value: locationNameToId[locationId]
+                        });
+                    } else {
+                        log.error("Unknown location", "Could not resolve location: " + locationId);
                     }
-                    else {
-                        locationId = 9;
-                    }
-                    rec.setValue({
-                        fieldId: 'custrecord_wms_ai_api_custrec_location',
-                        value: locationId
-                    });
                 }
 
                 rec.setValue({
@@ -1158,8 +801,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'post_returnOrders':
                     response = returnUtils.processReturn(context.data);
                     break;
-                case 'fullfillOrders':
-                    response = FullFillOrders(context, id);
+                case 'inventoryManagerApproved':
+                    response = inventoryApprovalUtil.InventoryManagerApproved(context, id);
                     break;
                 case 'binCount':
                     response = binUtils.binCount(context, id);
@@ -1176,17 +819,27 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 case 'sopicked_endoftheday':
                     response = jySoPickedStatsEOD.sopicked_endoftheday(context);
                     break;
+                // case 'binTransfer':
+                //     response = binUtils.binTransfer(context, id);
+                //     break;
                 case 'binTransfer':
-                    response = binUtils.binTransfer(context, id);
+
+                    var locationId = parseInt(context.location, 10);
+
+                    if (locationId == 9 || locationId == 15) {
+                        log.error("Performing bin transfer for location ID: " + locationId);
+                        response = binUtils.binTransfer(context, id);
+                    } else {
+                        log.error("Performing smart bin transfer for location ID: " + locationId);
+                        response = binUtils.smartBinOrInvTransfer(context, id);
+                    }
+
                     break;
                 case 'itemnotpicked_invchecked':
                     // log.error("itemnotpicked_invchecked - Inventory data response", JSON.stringify(context));
                     response = inventoryUtils.process_No_Inv_items(context);
                     break;
                 case 'markAsPicked':
-                    // log.error("Context before markAsPicked", context);
-                    // response = markAsPickedUtil.markAsPicked(context.data);
-                    //response = markAsPicked(context, id);
                     response = markAsPickedGroup(context, id);
                     break;
                 case 'fullFillPartsOrders':
@@ -1194,6 +847,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     break;
                 case 'dropShipmentData':
                     response = dropShipmentData(context);
+                    break;
+                case 'amzlShipMethodChange':
+                    response = orderUtils.amzlShipMethodChange(context);
                     break;
                 case 'receiveInbound':
                     response = orderUtils.transformInboundShipmentToItemReceipt(context, id);
@@ -1284,7 +940,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-    //Ship confirmation data
+
+
 
     function dropShipmentData(requestBody) {
 
@@ -1310,19 +967,19 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 locationInternalId = 15;
             }
 
-            log.error("Location ID Determined", {
-                location: location,
-                locationInternalId: locationInternalId
-            });
+            // log.error("Location ID Determined", {
+            //     location: location,
+            //     locationInternalId: locationInternalId
+            // });
 
-            log.error("Extracted Header Fields", {
-                location: location,
-                locationInternalId: locationInternalId,
-                shipMethod: shipMethod,
-                trailerId: trailerId,
-                arrivalDate: arrivalDate,
-                shipmentConfirmId: shipmentConfirmId
-            });
+            // log.error("Extracted Header Fields", {
+            //     location: location,
+            //     locationInternalId: locationInternalId,
+            //     shipMethod: shipMethod,
+            //     trailerId: trailerId,
+            //     arrivalDate: arrivalDate,
+            //     shipmentConfirmId: shipmentConfirmId
+            // });
 
             var rawDataItems = Array.isArray(data.data)
                 ? data.data
@@ -1348,7 +1005,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 });
             } catch (e) {
                 log.error("Error Processing Data Items", e);
-                throw e; // Re-throw to be caught by outer catch
+                //throw e; // Re-throw to be caught by outer catch
             }
 
             // Validation check
@@ -1363,18 +1020,18 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 };
             }
 
-            log.error("Data Items Processed Successfully", {
-                itemsCount: trackingObjects.length
-            });
+            // log.error("Data Items Processed Successfully", {
+            //     itemsCount: trackingObjects.length
+            // });
 
-            log.error("Processing Shipment", {
-                location: location,
-                shipMethod: shipMethod,
-                trailerId: trailerId,
-                arrivalDate: arrivalDate,
-                dataItemsCount: trackingObjects.length,
-                shipmentConfirmId: shipmentConfirmId
-            });
+            // log.error("Processing Shipment", {
+            //     location: location,
+            //     shipMethod: shipMethod,
+            //     trailerId: trailerId,
+            //     arrivalDate: arrivalDate,
+            //     dataItemsCount: trackingObjects.length,
+            //     shipmentConfirmId: shipmentConfirmId
+            // });
 
             // Validation: shipment_confirm_id is required
             if (!shipmentConfirmId) {
@@ -1437,25 +1094,25 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 }
             } catch (e) {
                 log.error("Error Loading/Creating Header Record", e);
-                throw e; // Re-throw to be caught by outer catch
+                //throw e; // Re-throw to be caught by outer catch
             }
 
             try {
                 // Update header fields (for both new and existing records)
-                log.error("Setting Header Fields", {
-                    hasLocation: !!location,
-                    locationInternalId: locationInternalId,
-                    hasShipMethod: !!shipMethod,
-                    hasTrailerId: !!trailerId,
-                    hasArrivalDate: !!arrivalDate
-                });
+                // log.error("Setting Header Fields", {
+                //     hasLocation: !!location,
+                //     locationInternalId: locationInternalId,
+                //     hasShipMethod: !!shipMethod,
+                //     hasTrailerId: !!trailerId,
+                //     hasArrivalDate: !!arrivalDate
+                // });
 
                 // Set location_id based on location value (not the location field itself)
                 headerRec.setValue("custrecord_jyswms_location_id", locationInternalId);
-                log.error("Location ID Set", {
-                    location: location,
-                    locationInternalId: locationInternalId
-                });
+                // log.error("Location ID Set", {
+                //     location: location,
+                //     locationInternalId: locationInternalId
+                // });
                 if (shipMethod) {
                     headerRec.setValue("custrecord_jyswms_ship_method", shipMethod);
                 }
@@ -1490,9 +1147,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 // Save complete incoming JSON (append or update)
                 headerRec.setValue("custrecord_jyswms_json", JSON.stringify(data));
 
-                log.error("Starting Sublist Processing", {
-                    totalLines: trackingObjects.length
-                });
+                // log.error("Starting Sublist Processing", {
+                //     totalLines: trackingObjects.length
+                // });
 
                 var addedLinesCount = 0;
                 var skippedLinesCount = 0;
@@ -1500,12 +1157,12 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 for (var i = 0; i < trackingObjects.length; i++) {
 
                     var tr = trackingObjects[i];
-                    log.error("Processing Sublist Line", {
-                        lineIndex: i + 1,
-                        totalLines: trackingObjects.length,
-                        item: tr.item,
-                        trackingNumber: tr.tracking_number
-                    });
+                    // log.error("Processing Sublist Line", {
+                    //     lineIndex: i + 1,
+                    //     totalLines: trackingObjects.length,
+                    //     item: tr.item,
+                    //     trackingNumber: tr.tracking_number
+                    // });
 
                     try {
                         // Check if line already exists with same tracking_number and item
@@ -1514,11 +1171,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             sublistId: "recmachcustrecord_jyswms_header_id"
                         });
 
-                        log.error("Checking Existing Lines", {
-                            existingLineCount: existingLineCount,
-                            item: tr.item,
-                            trackingNumber: tr.tracking_number
-                        });
+                        // log.error("Checking Existing Lines", {
+                        //     existingLineCount: existingLineCount,
+                        //     item: tr.item,
+                        //     trackingNumber: tr.tracking_number
+                        // });
 
                         // Loop through existing lines to check for duplicates
                         for (var j = 0; j < existingLineCount; j++) {
@@ -1537,13 +1194,13 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             // Check if both tracking_number and item match
                             if (existingTrackingNumber === tr.tracking_number && existingItem === tr.item) {
                                 lineExists = true;
-                                log.error("Duplicate Line Found - Skipping", {
-                                    lineIndex: j + 1,
-                                    item: tr.item,
-                                    trackingNumber: tr.tracking_number,
-                                    existingItem: existingItem,
-                                    existingTrackingNumber: existingTrackingNumber
-                                });
+                                // log.error("Duplicate Line Found - Skipping", {
+                                //     lineIndex: j + 1,
+                                //     item: tr.item,
+                                //     trackingNumber: tr.tracking_number,
+                                //     existingItem: existingItem,
+                                //     existingTrackingNumber: existingTrackingNumber
+                                // });
                                 break; // Exit loop once match is found
                             }
                         }
@@ -1551,19 +1208,19 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         // If line already exists, skip adding it
                         if (lineExists) {
                             skippedLinesCount++;
-                            log.error("Skipping Duplicate Line", {
-                                item: tr.item,
-                                trackingNumber: tr.tracking_number,
-                                skippedCount: skippedLinesCount
-                            });
+                            // log.error("Skipping Duplicate Line", {
+                            //     item: tr.item,
+                            //     trackingNumber: tr.tracking_number,
+                            //     skippedCount: skippedLinesCount
+                            // });
                             continue; // Skip to next iteration
                         }
 
                         // Line doesn't exist, proceed with adding new line
-                        log.error("No Duplicate Found - Adding New Line", {
-                            item: tr.item,
-                            trackingNumber: tr.tracking_number
-                        });
+                        // log.error("No Duplicate Found - Adding New Line", {
+                        //     item: tr.item,
+                        //     trackingNumber: tr.tracking_number
+                        // });
 
                         headerRec.selectNewLine({
                             sublistId: "recmachcustrecord_jyswms_header_id"
@@ -1614,10 +1271,10 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                                 // Validate the date
                                 if (isNaN(scannedDateObj.getTime())) {
-                                    log.error("Invalid scanned_at date format (field is optional, skipping)", {
-                                        scanned_at: tr.scanned_at,
-                                        item: tr.item
-                                    });
+                                    // log.error("Invalid scanned_at date format (field is optional, skipping)", {
+                                    //     scanned_at: tr.scanned_at,
+                                    //     item: tr.item
+                                    // });
                                     scannedDateObj = null;
                                 }
                             } catch (dateErr) {
@@ -1637,11 +1294,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 fieldId: "custrecord_jyswms_scanned_data",
                                 value: scannedDateObj
                             });
-                            log.error("Scanned Date Set Successfully", {
-                                item: tr.item,
-                                scanned_at: tr.scanned_at,
-                                parsedDate: scannedDateObj
-                            });
+                            // log.error("Scanned Date Set Successfully", {
+                            //     item: tr.item,
+                            //     scanned_at: tr.scanned_at,
+                            //     parsedDate: scannedDateObj
+                            // });
                         }
                         // Field is optional - if not provided or invalid, simply skip (no error)
 
@@ -1649,11 +1306,11 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                             sublistId: "recmachcustrecord_jyswms_header_id"
                         });
                         addedLinesCount++;
-                        log.error("Sublist Line Committed Successfully", {
-                            lineIndex: i + 1,
-                            item: tr.item,
-                            addedCount: addedLinesCount
-                        });
+                        // log.error("Sublist Line Committed Successfully", {
+                        //     lineIndex: i + 1,
+                        //     item: tr.item,
+                        //     addedCount: addedLinesCount
+                        // });
                     } catch (lineErr) {
                         log.error("Error Processing Sublist Line", {
                             lineIndex: i + 1,
@@ -1667,43 +1324,43 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     }
                 }
 
-                log.error("Sublist Processing Completed", {
-                    totalLines: trackingObjects.length,
-                    addedLines: addedLinesCount,
-                    skippedLines: skippedLinesCount,
-                    processedLines: addedLinesCount + skippedLinesCount
-                });
+                // log.error("Sublist Processing Completed", {
+                //     totalLines: trackingObjects.length,
+                //     addedLines: addedLinesCount,
+                //     skippedLines: skippedLinesCount,
+                //     processedLines: addedLinesCount + skippedLinesCount
+                // });
             } catch (e) {
                 log.error("Error Setting Header Fields or Processing Sublist", e);
-                throw e; // Re-throw to be caught by outer catch
+                // throw e; // Re-throw to be caught by outer catch
             }
 
-            log.error("Before DropShip Header Save", {
-                location: location,
-                shipMethod: shipMethod,
-                trailerId: trailerId,
-                arrivalDate: arrivalDate,
-                shipmentConfirmId: shipmentConfirmId,
-                dataItemsCount: trackingObjects.length,
-                isExistingRecord: !!existingRecordId,
-                existingRecordId: existingRecordId
-            });
+            // log.error("Before DropShip Header Save", {
+            //     location: location,
+            //     shipMethod: shipMethod,
+            //     trailerId: trailerId,
+            //     arrivalDate: arrivalDate,
+            //     shipmentConfirmId: shipmentConfirmId,
+            //     dataItemsCount: trackingObjects.length,
+            //     isExistingRecord: !!existingRecordId,
+            //     existingRecordId: existingRecordId
+            // });
 
             var savedId;
             try {
                 savedId = headerRec.save();
-                log.error("Saved DropShip Header", {
-                    savedId: savedId,
-                    isExistingRecord: !!existingRecordId,
-                    action: existingRecordId ? "Updated Existing Record" : "Created New Record"
-                });
+                // log.error("Saved DropShip Header", {
+                //     savedId: savedId,
+                //     isExistingRecord: !!existingRecordId,
+                //     action: existingRecordId ? "Updated Existing Record" : "Created New Record"
+                // });
             } catch (saveErr) {
                 log.error("Error Saving DropShip Header Record", {
                     error: saveErr,
                     existingRecordId: existingRecordId,
                     isExistingRecord: !!existingRecordId
                 });
-                throw saveErr; // Re-throw to be caught by outer catch
+                //throw saveErr; // Re-throw to be caught by outer catch
             }
 
             return {
@@ -1740,7 +1397,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 password: "s9u[7zC720%pZr"
             };
 
-            log.error("formData ", formData);
+            //   log.error("formData ", formData);
 
             var headerObj = {
                 'Content-Type': 'application/json'
@@ -1753,7 +1410,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     headers: headerObj
                 });
 
-                log.error("response", JSON.stringify(response));
+                //log.error("response", JSON.stringify(response));
 
                 var responseBody = response.body;
                 var parsedBody = JSON.parse(responseBody); // Convert JSON string to object
@@ -1783,7 +1440,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             // custsecret_wms_ai_portal_credientals
             const requestBody = body;
             var token = generateToken();
-            log.error("token", token);
+            // log.error("token", token);
 
             const headers = {
                 'Authorization': `Bearer ${token}`,
@@ -1795,7 +1452,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 body: JSON.stringify(requestBody),
                 headers: headers
             });
-            log.error("response", JSON.stringify(response));
+            // log.error("response", JSON.stringify(response));
             return {
                 success: true,
                 response: response
@@ -1858,1752 +1515,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         } catch (e) {
             log.error('Error in lookForExistingRecords', e.message);
             return false;
-        }
-    }
-
-    /*
-    function markAsPicked(requestBody, jyswmsApiCustRecId) {
-        var headerId = null;
-        try {
- 
-            const startTime = new Date().getTime();
- 
-            log.error('Incoming Data - MarkAsPicked', JSON.stringify(requestBody));
-            var savedTransfers = [];
-            var savedHeaders = [];
-            var isSingleIf = false;
-            // STEP 1: Build existing SO map
-            var existingMap = {};
-            var binMap = getBinNameToIdMap();
- 
-            var headerSearch = search.create({
-                type: 'customrecord_order_fulfillment_details',
-                filters: [
-                    ["custrecord_jyswms_rel_item_ful", "anyof", "@NONE@"],
-                    'AND',
-                    ["isinactive", "is", "F"]
-                    // , 'AND',
-                    //  ['custrecord_jyswms_carrier_pro_number', 'isempty']
-                ],
-                columns: ['internalid', 'custrecord_jyswms_sales_order_id']
-            });
-            headerSearch.run().each(function (result) {
-                existingMap[result.getValue('custrecord_jyswms_sales_order_id')] = result.id;
-                return true;
-            });
-            log.audit('Existing SO Map', JSON.stringify(existingMap));
- 
-            // Validate request body structure
-            if (!requestBody || !requestBody.data || !Array.isArray(requestBody.data)) {
-                return {
-                    status: 'error',
-                    message: 'Invalid request body: data array is required'
-                };
-            }
- 
-            // STEP 2: Process each sales order in JSON
-            for (var d = 0; d < requestBody.data.length; d++) {
-                var Data = requestBody.data[d];
-                var salesOrders = Data.salesOrders || [];
- 
-                // Skip if no sales orders in this data item
-                if (!salesOrders || salesOrders.length === 0) {
-                    log.error('No sales orders found in data item', d);
-                    continue;
-                }
- 
-                for (var i = 0; i < salesOrders.length; i++) {
- 
-                    var so = salesOrders[i];
-                    var salesOrderId = so.salesOrderId;
- 
-                    try {
-                        if (salesOrderId && jyswmsApiCustRecId) {
-                            record.submitFields({
-                                type: 'customrecord_wms_ai_api_custom_rec',
-                                id: jyswmsApiCustRecId,
-                                values: {
-                                    custrecord_jyswms_related_tran_record: salesOrderId
-                                },
-                                options: {
-                                    enableSourcing: false,
-                                    ignoreMandatoryFields: true
-                                }
-                            });
-                        }
- 
-                    } catch (error) {
-                        log.error("error setting the so", error.message)
-                    }
- 
- 
- 
-                    if (!salesOrderId) continue;
- 
-                    var itemId = so.itemInternalId || Data.itemInternalId || Data.item || '';
-                    var pickQty = Data.picked_quantity || 0;
-                    var binId = Data.binInternalId || '';
-                    var uniqueId = so.unique_id || '';
-                    var isClose = (
-                        isTruthyFlag(Data.isClose) ||
-                        isTruthyFlag(Data.is_close) ||
-                        isTruthyFlag(so.is_close)
-                    );
-                    var locationId = Data.locationId || null;
- 
- 
- 
-                    if (!locationId && Data.location) {
-                        locationId = Data.location === "L60-Hardeeville_SC" ? 15 : 9;
-                    }
- 
-                    if (!binId) {
-                        var binNumber = Data.bin;
-                        binId = binMap[binNumber]
-                    }
- 
-                    var savedId = so.bin_transfer_internal_id || "";
-                    var portalId = requestBody.portalId || requestBody.portalid;
-                    var pickerName = requestBody.userName || requestBody.username || requestBody.pickerName;
- 
- 
- 
- 
-                    var trackingNumbers = [];
- 
-                    // --- Extract tracking numbers safely ---
-                    var trackingList = (so.labelData || [])
-                        .map(function (l) {
-                            return l.sscc_code || l.tracking_number || "";
-                        })
-                        .filter(Boolean);
- 
-                    // --- Extract SSCC codes ONLY if labelData2 exists ---
-                    var ssccList = (so.labelData2 || [])
-                        .map(function (l) {
-                            return l.sscc_code || l.tracking_number || "";
-                        })
-                        .filter(Boolean);
- 
-                    log.error("trackingList", trackingList);
-                    log.error("ssccList", ssccList);
- 
- 
-                    if (so.packing_slip) {
-                        trackingList = [];
- 
-                        trackingList = (so.labelData || [])
-                            .map(function (l) {
-                                return l.tracking_number || "";
-                            })
-                            .filter(Boolean);
- 
-                    }
- 
-                    // --- CASE 1: labelData2 exists → pair by index ---
-                    if (ssccList.length && trackingList.length && !so.packing_slip) {
- 
-                        var pairCount = Math.min(trackingList.length, ssccList.length);
- 
-                        for (var i = 0; i < pairCount; i++) {
-                            trackingNumbers.push({
-                                ssccCode: ssccList[i],
-                                trackingNumber: trackingList[i]
-                            });
-                        }
- 
-                    }
-                    // --- CASE 2: labelData2 does NOT exist → tracking only ---
-                    else if (!so.packing_slip) {
-                        trackingList.forEach(function (tn) {
-                            trackingNumbers.push({
-                                ssccCode: tn,       // fallback behavior
-                                trackingNumber: ""
-                            });
-                        });
-                    }
-                    else {
-                        trackingList.forEach(function (tn) {
-                            trackingNumbers.push({
-                                trackingNumber: tn,
-                                ssccCode: ""    // fallback behavi
-                            });
-                        });
-                    }
- 
- 
- 
- 
-                  //  log.error("trackingNumbers", trackingNumbers);
- 
- 
-                    log.audit('Processing SO', {
-                        salesOrderId: salesOrderId,
-                        itemId: itemId,
-                        binId: binId,
-                        locationId: locationId,
-                        pickQty: pickQty
-                    });
- 
-                    // fallback lookup location if missing
-                    if (!locationId && binId) {
-                        var locationLookup = search.lookupFields({
-                            type: search.Type.BIN,
-                            id: binId,
-                            columns: ['location']
-                        });
-                        locationId = locationLookup.location && locationLookup.location[0] && locationLookup.location[0].value;
-                    }
- 
-                    // Validate required fields before proceeding
-                    if (!itemId) {
-                        log.error('Missing itemId for sales order', salesOrderId);
-                        continue;
-                    }
- 
-                    // If caller sent isClose flag, close SO line and skip pick flow
-                    if (isClose === true) {
-                        log.audit('isClose flag detected - closing SO line', {
-                            salesOrderId: salesOrderId,
-                            itemId: itemId,
-                            uniqueId: uniqueId
-                        });
-                        closeSalesOrderItem(salesOrderId, itemId, uniqueId);
-                        continue;
-                    }
- 
-                    if (pickQty === null || pickQty === undefined) {
- 
- 
-                        log.error('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
-                        continue;
- 
-                    }
-                    if (!locationId) {
-                        log.error('Missing locationId for sales order', salesOrderId);
-                        continue;
-                    }
- 
-                    var bulkStageBin = (locationId === 9) ? 4859 : 16692;
- 
-                    // STEP 3: Load or create header
-                    headerId = existingMap[salesOrderId];
-                    log.error("headerId", headerId);
-                    var headerRec;
- 
- 
-                    // var isSingleIf = false;
- 
-                    // if (headerId) {
- 
- 
- 
- 
-                    //     var customerlookup = search.lookupFields({
-                    //         type: 'customrecord_order_fulfillment_details',
-                    //         id: headerId,
-                    //         columns: ['custrecord_jyswms_customer_frm_so']
-                    //     });
- 
-                    //      var lookup = search.lookupFields({
-                    //         type: 'customrecord_order_fulfillment_details',
-                    //         id: headerId,
-                    //         columns: ['custrecord_jywms_single_if_from_customer']
-                    //     });
- 
-                    //   log.error("lookup",JSON.stringify(lookup));
- 
-                    //   log.error("lookup",JSON.stringify(customerlookup));
- 
-                    //     isSingleIf =
-                    //         lookup.custrecord_jywms_single_if_from_customer &&
-                    //         lookup.custrecord_jywms_single_if_from_customer.length > 0 &&
-                    //         lookup.custrecord_jywms_single_if_from_customer[0].value === 'T';
-                    // }
-                    if (headerId) {
- 
-                        log.error("headerId", headerId);
- 
-                        const salesorderSearchObj = search.create({
-                            type: "salesorder",
-                            filters: [
-                                ["type", "anyof", "SalesOrd"],
-                                "AND",
-                                ["internalid", "anyof", salesOrderId],
-                                "AND",
-                                ["mainline", "is", "T"]
-                            ],
-                            columns: [
-                                search.createColumn({
-                                    name: "custentity_single_if",
-                                    join: "customer"
-                                })
-                            ]
-                        });
- 
-                        salesorderSearchObj.run().each(function (result) {
- 
-                            var singleIFValue = result.getValue({
-                                name: "custentity_single_if",
-                                join: "customer"
-                            });
- 
-                            isSingleIf = singleIFValue === true || singleIFValue === 'T';
- 
-                            return false; // Only one result expected
-                        });
- 
- 
-                        log.debug("Final isSingleIf", isSingleIf);
-                    }
-                  
-                    if (salesOrderId) {
- 
-                        log.error("headerId", headerId);
- 
-                        const salesorderSearchObj = search.create({
-                            type: "salesorder",
-                            filters: [
-                                ["type", "anyof", "SalesOrd"],
-                                "AND",
-                                ["internalid", "anyof", salesOrderId],
-                                "AND",
-                                ["mainline", "is", "T"]
-                            ],
-                            columns: [
-                                search.createColumn({
-                                    name: "custentity_single_if",
-                                    join: "customer"
-                                })
-                            ]
-                        });
- 
-                        salesorderSearchObj.run().each(function (result) {
- 
-                            var singleIFValue = result.getValue({
-                                name: "custentity_single_if",
-                                join: "customer"
-                            });
- 
-                            isSingleIf = singleIFValue === true || singleIFValue === 'T';
- 
-                            return false; // Only one result expected
-                        });
- 
- 
-                        log.debug("Final isSingleIf", isSingleIf);
-                    }
- 
-                  
- 
- 
-                   // log.error("isSingleIf", isSingleIf);
- 
-                    if (headerId && isSingleIf) {
- 
-                        // Reuse existing header ONLY when checkbox is checked
-                        headerRec = record.load({
-                            type: 'customrecord_order_fulfillment_details',
-                            id: headerId,
-                            isDynamic: true
-                        });
- 
-                    } else {
-                        //  Create new header when:
-                        // - no headerId
-                        // - OR checkbox is unchecked
-                        headerRec = record.create({
-                            type: 'customrecord_order_fulfillment_details',
-                            isDynamic: true
-                        });
- 
-                        headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
-                        headerRec.setValue('custrecord_jyswms_portal_id', portalId);
-                        headerRec.setValue('custrecord_jyswms_location_id', locationId);
- 
-                        headerId = headerRec.save();
- 
-                       // log.error("Created new header record", headerId);
-                    }
- 
- 
-                    // STEP 4: Create Bin Transfer
-                    if (savedId) {
-                        log.error("savedId -- bintrnasferid", savedId);
-                    } else {
- 
-                        try {
- 
-                            var binTransferRec = record.create({ type: 'bintransfer', isDynamic: true });
-                            binTransferRec.setValue({ fieldId: 'subsidiary', value: 1 });
-                            binTransferRec.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-                            binTransferRec.setValue({ fieldId: 'memo', value: 'Bin Transfer via Restlet' });
-                            binTransferRec.setValue({ fieldId: 'location', value: locationId });
-                            binTransferRec.setValue({ fieldId: 'custbody_jyswms_item_unique_id', value: uniqueId });
-                            binTransferRec.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName });
-                            binTransferRec.setValue({ fieldId: 'custbody_realted_sales_order', value: salesOrderId });
- 
-                            binTransferRec.selectNewLine({ sublistId: 'inventory' });
-                            binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
-                            binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'quantity', value: pickQty });
- 
-                            var inventoryDetail = binTransferRec.getCurrentSublistSubrecord({
-                                sublistId: 'inventory',
-                                fieldId: 'inventorydetail'
-                            });
-                            inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: binId });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: pickQty });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'tobinnumber', value: bulkStageBin });
-                            inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
- 
-                            binTransferRec.commitLine({ sublistId: 'inventory' });
- 
-                            log.audit('BinTransfer Record - Before Save', {
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty,
-                                fromBin: binId,
-                                toBin: bulkStageBin
-                            });
- 
-                            // Save bin transfer with error handling
-                            // var savedId = null;
- 
-                            try {
-                                savedId = binTransferRec.save();
-                            } catch (e) {
-                                log.error("error saving bintransfer", e.message);
-                            }
-                            //  log.error("BinTransfer savedId", savedId);
-                        } catch (binTransferError) {
-                            log.error('Failed to save bin transfer', {
-                                error: binTransferError.message,
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty
-                            });
-                            // Bin transfer failed, but continue processing to create custom record line
- 
-                        }
-                    }
- 
-                    // STEP 5: Reload header record before adding lines (ensures fresh copy)
-                    // This is critical: ensures we have the latest version before adding sublist lines
-                    headerRec = record.load({
-                        type: 'customrecord_order_fulfillment_details',
-                        id: headerId,
-                        isDynamic: true
-                    });
- 
-                    try {
- 
-                     //   var singleIf = headerRec.getValue('custrecord_jywms_single_if_from_customer');
-                        if (isSingleIf == false || isSingleIf == 'F') {
-                            headerRec.setValue('custrecord_jyswms_is_partially_fulfilled', true);
-                            headerRec.setValue('custrecord_jyswms_approved', true);
-                            headerRec.setValue('custrecord_jyswmws_perform_update', true);
- 
-                        }
-                        headerRec.setValue('custrecord_jyswms_location_id', locationId);
- 
-                    } catch (error) {
-                        log.error("error message", error.message);
-                    }
- 
- 
-                    // STEP 6: Adding JYSWMS sales order Items (custom recrd lines)
-                    var line = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_sales_order_header' });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item', value: itemId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_order_qty', value: so.quantity });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_picked_qty', value: pickQty });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_sales_order', value: salesOrderId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_picked_bin', value: binId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jswms_item_so_item_qty', value: so.item_quantity });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_so_line_loc', value: locationId });
-                    // Initialize inventory adjustment ID
-                    var invAdjId = "";
- 
-                    // Wrap entire negative inventory adjustment logic in try-catch block
-                    try {
-                        var soItemQuantity = so.quantity;
-                        // log.error("soItemQuantity", soItemQuantity);
- 
-                        var userPickedQty = pickQty;
-                        //  log.error("userPickedQty", userPickedQty);
- 
-                        // Calculate quantity difference
-                        var qtyDiff = soItemQuantity - userPickedQty;
-                        if (qtyDiff <= 0) {
-                            log.debug("No adjustment needed — fully picked");
-                            // Continue processing without adjustment
-                        } else {
-                            // Create inventory adjustment if there's a shortfall
-                            // var negativeQty = -qtyDiff;
- 
-                            // new logic for fetching item quantity per bin details
- 
-                            var negativeQty = '';
-                            const inventorybalanceSearchObj = search.create({
-                                type: "inventorybalance",
-                                filters:
-                                    [
-                                        ["item", "anyof", itemId],
-                                        "AND",
-                                        ["location", "anyof", locationId],
-                                        "AND",
-                                        ["available", "greaterthan", "0"],
-                                        "AND",
-                                        ["binnumber.custrecord_jyswms_exclude_from_inventory", "is", "F"],
-                                        "AND",
-                                        ["binnumber", "anyof", binId],
-                                        "AND",
-                                        ["binnumber.inactive", "is", "F"]
-                                    ],
-                                columns:
-                                    [
-                                        search.createColumn({
-                                            name: "onhand",
-                                            summary: "SUM",
-                                            label: "On Hand"
-                                        })
-                                    ]
-                            });
-                            inventorybalanceSearchObj.run().each(function (result) {
-                                var onHandQty = result.getValue({ name: "onhand", summary: "SUM" });
-                                negativeQty = -onHandQty;
-                                return true;
-                            });
- 
- 
-                            log.debug(" Negative inventory adjustment - NegativeQuanity : ", negativeQty);
- 
-                            var inventoryAdjRec = record.create({
-                                type: record.Type.INVENTORY_ADJUSTMENT,
-                                isDynamic: true
-                            });
- 
-                            // Set subsidiary (update if your account uses multiple)
-                            inventoryAdjRec.setValue({
-                                fieldId: 'subsidiary',
-                                value: 1
-                            });
- 
-                            inventoryAdjRec.setValue({ fieldId: 'adjlocation', value: locationId });
- 
-                            inventoryAdjRec.setValue({
-                                fieldId: 'account',
-                                value: 464 // update as needed
-                            });
- 
-                            inventoryAdjRec.setValue({ fieldId: 'memo', value: 'Auto negative adjustment for bin: ' + binId });
- 
-                            // Add inventory line
-                            inventoryAdjRec.selectNewLine({ sublistId: 'inventory' });
- 
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'item',
-                                value: itemId
-                            });
- 
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'location',
-                                value: locationId
-                            });
- 
-                            // Set quantity before inventory detail
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'adjustqtyby',
-                                value: negativeQty
-                            });
- 
-                            // Lookup item properties safely
-                            var itemLookup = search.lookupFields({
-                                type: search.Type.ITEM,
-                                id: itemId,
-                                columns: ['usebins', 'recordtype']
-                            });
- 
-                            // log.error('Item Lookup', JSON.stringify(itemLookup));
- 
-                            var useBins =
-                                itemLookup.usebins === true ||
-                                itemLookup.usebins === 'T' ||
-                                (Array.isArray(itemLookup.usebins) && itemLookup.usebins[0] === 'T');
- 
-                            var isInventoryItem =
-                                ['inventoryitem', 'serializedinventoryitem', 'lotnumberedinventoryitem'].includes(itemLookup.recordtype);
- 
-                            if (useBins && isInventoryItem && binId) {
-                                try {
-                                    var invDetail = inventoryAdjRec.getCurrentSublistSubrecord({
-                                        sublistId: 'inventory',
-                                        fieldId: 'inventorydetail'
-                                    });
- 
-                                    // 1.Remove existing inventory assignment lines
-                                    var existingLines = invDetail.getLineCount({ sublistId: 'inventoryassignment' });
-                                    for (var k = existingLines - 1; k >= 0; k--) {
-                                        invDetail.removeLine({ sublistId: 'inventoryassignment', line: k });
-                                    }
-                                    // log.error(" Cleared Existing Inventory Lines", existingLines);
- 
-                                    // 2: Add new inventory assignment
-                                    invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
- 
-                                    invDetail.setCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'binnumber',
-                                        value: binId
-                                    });
-                                    invDetail.setCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'quantity',
-                                        value: negativeQty
-                                    });
- 
-                                    // Step 3: Verify values before commit
-                                    var getBinID = invDetail.getCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'binnumber'
-                                    });
-                                    var getQty = invDetail.getCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'quantity'
-                                    });
- 
- 
-                                    invDetail.commitLine({ sublistId: 'inventoryassignment' });
-                                    log.audit(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
- 
-                                } catch (invDetailError) {
-                                    log.error("❌ Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
-                                    // Continue with adjustment even if inventory detail fails
-                                }
-                            } else {
-                                log.error("Skipping inventory detail — missing bin or not inventory-managed");
-                            }
- 
-                            inventoryAdjRec.commitLine({ sublistId: 'inventory' });
- 
-                            var summary = {
-                                itemId: itemId,
-                                binId: binId,
-                                locationId: locationId,
-                                negativeQty: negativeQty
-                            };
- 
- 
-                            // Save record
-                            invAdjId = inventoryAdjRec.save({
-                                enableSourcing: true,
-                                ignoreMandatoryFields: true
-                            });
- 
-                            log.error(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
-                        }
-                    } catch (negativeInvError) {
-                        log.error(" Negative Inventory Adjustment Error", {
-                            error: negativeInvError.name + " | " + negativeInvError.message,
-                            salesOrderId: salesOrderId,
-                            itemId: itemId,
-                            pickQty: pickQty
-                        });
-                        // Continue processing even if adjustment fails - invAdjId remains null
-                    }
- 
-                    // Set bin transfer ID and inventory adjustment ID on the line
-                    // Only set bin transfer ID if bin transfer was successful
-                    if (savedId) {
-                        line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_item_bintransfer_id', value: savedId });
-                    }
- 
-                    if (invAdjId) {
-                        line.setCurrentSublistValue({
-                            sublistId: 'recmachcustrecord_sales_order_header',
-                            fieldId: 'custrecord_jyswms_item_inv_adjy',
-                            value: invAdjId
-                        });
-                    }
- 
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_uniqueid', value: uniqueId });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_portal_id', value: portalId });
- 
-                    line.setCurrentSublistValue({
-                        sublistId: 'recmachcustrecord_sales_order_header',
-                        fieldId: 'custrecord_jyswms_item_picker_name',
-                        value: pickerName
-                    });
-                    line.setCurrentSublistValue({ sublistId: 'recmachcustrecord_sales_order_header', fieldId: 'custrecord_jyswms_item_tracking_numbers', value: trackingNumbers.length || 0 });
-                    headerRec.commitLine({ sublistId: 'recmachcustrecord_sales_order_header' });
- 
-                    // STEP 7: Add tracking sublist lines lines
-                    // log.error('Tracking Numbers', trackingNumbers);
- 
-                    trackingNumbers.forEach(function (track) {
- 
-                        // if (!track || !track.ssccCode) {
-                        //     log.error("Skipping – SSCC missing", track);
-                        //     return;
-                        // }
-                        if (!track) {
-                            log.error("Skipping – track missing", track);
-                            return;
-                        }
- 
-                        // 🔍 CHECK IN SUBLIST (not input array)
-                        if (ssccExistsInSublist(headerRec, track.ssccCode)) {
-                            log.error("Skipping – SSCC already exists in sublist", track.ssccCode);
-                            return;
-                        }
- 
- 
-                        //  log.error("track", track);
-                        var trackLine = headerRec.selectNewLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_item', value: itemId });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_number', value: track.ssccCode });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_so_id', value: salesOrderId });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_qty', value: 1 });
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_uniqueid', value: uniqueId });
-                        // log.error("track.tracking number", track.trackingNumber)
-                        trackLine.setCurrentSublistValue({ sublistId: 'recmachcustrecord_jyswms_so_header', fieldId: 'custrecord_jyswms_track_dropship', value: track.trackingNumber || " " });
-                        headerRec.commitLine({ sublistId: 'recmachcustrecord_jyswms_so_header' });
-                    });
- 
-                    // log.error("Started Header line set");
- 
-                    //  Get total SO quantity from Sales Order
-                    var soLookup = search.lookupFields({
-                        type: 'salesorder',
-                        id: salesOrderId,
-                        columns: ['custbody_so_total_qty']
-                    });
-                    var totalSOQty = Number(soLookup.custbody_so_total_qty) || 0;
- 
-                    //  Calculate total picked quantity from all item lines
-                    var totalPickedQty = pickQty;
-                    var lineCount = headerRec.getLineCount({ sublistId: 'recmachcustrecord_sales_order_header' });
- 
-                    for (var l = 0; l < lineCount; l++) {
-                        var linePicked = Number(headerRec.getSublistValue({
-                            sublistId: 'recmachcustrecord_sales_order_header',
-                            fieldId: 'custrecord_jyswms_item_picked_qty',
-                            line: l
-                        })) || 0;
-                        totalPickedQty += linePicked;
-                    }
- 
-                    // Set both totals on header
-                    headerRec.setValue({ fieldId: 'custrecord_jyswms_total_so_qty', value: totalSOQty });
-                    headerRec.setValue({ fieldId: 'custrecord_jyswms_total_pick_qty', value: totalPickedQty });
- 
-                    //  Compare totals and set Approved checkbox
-                    var isApproved = (totalSOQty <= totalPickedQty);
-                   // var singleIf = headerRec.getValue({ fieldId: 'custrecord_jywms_single_if_from_customer' });
- 
-                    if (isSingleIf == true || isSingleIf == 'T') {
-                        headerRec.setValue({
-                            fieldId: 'custrecord_jyswms_approved',
-                            value: isApproved ? true : false
-                        });
-                    }
- 
-                    log.error('Header Totals and Approval', {
-                        totalSOQty: totalSOQty,
-                        totalPickedQty: totalPickedQty,
-                        approved: isApproved
-                    });
- 
-                    // Save header record with error handling
-                    try {
-                        headerId = headerRec.save();
-                        // log.error("Saved Header", headerId);
-                        existingMap[salesOrderId] = headerId;
- 
-                        // Add to response arrays for each sales order
-                        // Only add bin transfer ID if bin transfer was successful
-                        if (savedId) {
-                            savedTransfers.push(savedId);
-                        }
-                        savedHeaders.push(headerId);
- 
- 
-                    } catch (headerSaveError) {
-                        log.error('Failed to save header record', {
-                            error: headerSaveError.message,
-                            salesOrderId: salesOrderId,
-                            headerId: headerId
-                        });
-                        // Continue to next sales order instead of failing entire batch
-                        continue;
-                    }
-                }
- 
-                log.audit("MarkAsPicked", "savedTransfers: " + JSON.stringify(savedTransfers) + ", savedHeaders: " + JSON.stringify(savedHeaders));
- 
-            }
-            const endTime = new Date().getTime();
- 
-            // Build expected JSON response
-            const expectedResponse = {
-                status: 'success',
-                message: 'Items & tracking numbers processed successfully',
-                binTransferId: savedTransfers,
-                customRecID: savedHeaders
-            };
- 
-            // Log the expected JSON response
-            log.debug('Expected JSON Response - MarkASpicked', JSON.stringify(expectedResponse));
- 
-            return expectedResponse;
- 
-        }
-        catch (e) {
-            log.error('POST Error', e);
-            if (headerId) {
-                record.submitFields({
-                    type: 'customrecord_order_fulfillment_details',
-                    id: headerId,
-                    values: {
-                        custrecord_jyswms_error: e.message,
-                        custrecord_jyswms_item_error_: e.message
-                    }
-                });
-            }
-            return { status: 'error', message: e.message };
-        }
-    }
-    */
-
-    function markAsPicked(requestBody, jyswmsApiCustRecId) {
-        var headerId = null;
-        try {
-            var savedTransfers = [];
-            var savedHeaders = [];
-            var isSingleIf = false;
-            var itemLines = [];
-            var trackingLines = [];
-            var packageLines = [];
-            var salesOrderId = requestBody.salesOrderId || (requestBody.data && requestBody.data[0] && requestBody.data[0].salesOrders && requestBody.data[0].salesOrders[0] && requestBody.data[0].salesOrders[0].salesOrderId) || null;
-
-            // STEP 1: Build existing SO map
-            var existingMap = {};
-            var binMap = getBinNameToIdMap();
-
-            var filters = [
-                ["custrecord_jyswms_rel_item_ful", "anyof", "@NONE@"],
-                'AND',
-                ["isinactive", "is", "F"]
-            ];
-            if (salesOrderId) {
-
-                log.error('Adding sales order filter to search', salesOrderId);
-
-                filters.push('AND');
-                filters.push(['custrecord_jyswms_sales_order_id', "anyof", salesOrderId]);
-            }
-
-            var headerSearch = search.create({
-                type: 'customrecord_order_fulfillment_details',
-                // filters: [
-                //     ["custrecord_jyswms_rel_item_ful", "anyof", "@NONE@"],
-                //     'AND',
-                //     ["isinactive", "is", "F"],
-                //     , 'AND',
-                //      ['custrecord_jyswms_sales_order_id',"anyof", salesOrderId]
-                //     // , 'AND',
-                //     //  ['custrecord_jyswms_carrier_pro_number', 'isempty']
-                // ],
-                filters: filters,
-                columns: ['internalid', 'custrecord_jyswms_sales_order_id']
-            });
-            headerSearch.run().each(function (result) {
-                existingMap[result.getValue('custrecord_jyswms_sales_order_id')] = result.id;
-                return true;
-            });
-            log.audit('Existing SO Map', JSON.stringify(existingMap));
-
-            // Validate request body structure
-            if (!requestBody || !requestBody.data || !Array.isArray(requestBody.data)) {
-                return {
-                    status: 'error',
-                    message: 'Invalid request body: data array is required'
-                };
-            }
-
-            // STEP 2: Process each sales order in JSON
-            for (var d = 0; d < requestBody.data.length; d++) {
-                var Data = requestBody.data[d];
-                var salesOrders = Data.salesOrders || [];
-
-                // Skip if no sales orders in this data item
-                if (!salesOrders || salesOrders.length === 0) {
-                    log.error('No sales orders found in data item', d);
-                    continue;
-                }
-
-                for (var i = 0; i < salesOrders.length; i++) {
-
-                    var so = salesOrders[i];
-                    salesOrderId = so.salesOrderId;
-
-                    try {
-                        if (salesOrderId && jyswmsApiCustRecId) {
-                            record.submitFields({
-                                type: 'customrecord_wms_ai_api_custom_rec',
-                                id: jyswmsApiCustRecId,
-                                values: {
-                                    custrecord_jyswms_related_tran_record: salesOrderId
-                                },
-                                options: {
-                                    enableSourcing: false,
-                                    ignoreMandatoryFields: true
-                                }
-                            });
-                        }
-
-                    } catch (error) {
-                        log.error("error setting the so", error.message)
-                    }
-
-
-
-                    if (!salesOrderId) continue;
-
-                    var itemId = so.itemInternalId || Data.itemInternalId || Data.item || '';
-                    var pickQty = Data.picked_quantity || 0;
-                    var binId = Data.binInternalId || '';
-                    var uniqueId = so.unique_id || '';
-                    var isClose = (
-                        isTruthyFlag(Data.isClose) ||
-                        isTruthyFlag(Data.is_close) ||
-                        isTruthyFlag(so.is_close)
-                    );
-                    var locationId = Data.locationId || null;
-                    if (!locationId && Data.location) {
-                        locationId = Data.location === "L60-Hardeeville_SC" ? 15 : 9;
-                    }
-
-                    if (!binId) {
-                        var binNumber = Data.bin;
-                        binId = binMap[binNumber]
-                    }
-
-                    var savedId = so.bin_transfer_internal_id || "";
-                    var portalId = requestBody.portalId || requestBody.portalid;
-                    var pickerName = requestBody.userName || requestBody.username || requestBody.pickerName;
-                    var trackingNumbers = [];
-
-                    // --- Extract tracking numbers safely ---
-                    var trackingList = (so.labelData || [])
-                        .map(function (l) {
-                            return l.sscc_code || l.tracking_number || "";
-                        })
-                        .filter(Boolean);
-
-                    // --- Extract SSCC codes ONLY if labelData2 exists ---
-                    var ssccList = (so.labelData2 || [])
-                        .map(function (l) {
-                            return l.sscc_code || l.tracking_number || "";
-                        })
-                        .filter(Boolean);
-
-                    log.error("trackingList", trackingList);
-                    log.error("ssccList", ssccList);
-
-
-                    if (so.packing_slip) {
-                        trackingList = [];
-
-                        trackingList = (so.labelData || [])
-                            .map(function (l) {
-                                return l.tracking_number || "";
-                            })
-                            .filter(Boolean);
-
-                    }
-
-                    // --- CASE 1: labelData2 exists → pair by index ---
-                    if (ssccList.length && trackingList.length && !so.packing_slip) {
-
-                        var pairCount = Math.min(trackingList.length, ssccList.length);
-
-                        for (var i = 0; i < pairCount; i++) {
-                            trackingNumbers.push({
-                                ssccCode: ssccList[i],
-                                trackingNumber: trackingList[i]
-                            });
-                        }
-
-                    }
-                    // --- CASE 2: labelData2 does NOT exist → tracking only ---
-                    else if (!so.packing_slip) {
-                        trackingList.forEach(function (tn) {
-                            trackingNumbers.push({
-                                ssccCode: tn,       // fallback behavior
-                                trackingNumber: ""
-                            });
-                        });
-                    }
-                    else {
-                        trackingList.forEach(function (tn) {
-                            trackingNumbers.push({
-                                trackingNumber: tn,
-                                ssccCode: ""    // fallback behavi
-                            });
-                        });
-                    }
-
-
-                    // fallback lookup location if missing
-                    if (!locationId && binId) {
-                        var locationLookup = search.lookupFields({
-                            type: search.Type.BIN,
-                            id: binId,
-                            columns: ['location']
-                        });
-                        locationId = locationLookup.location && locationLookup.location[0] && locationLookup.location[0].value;
-                    }
-
-                    // Validate required fields before proceeding
-                    if (!itemId) {
-                        log.error('Missing itemId for sales order', salesOrderId);
-                        continue;
-                    }
-
-                    // If caller sent isClose flag, close SO line and skip pick flow
-                    if (isClose === true) {
-                        log.audit('isClose flag detected - closing SO line', {
-                            salesOrderId: salesOrderId,
-                            itemId: itemId,
-                            uniqueId: uniqueId
-                        });
-                        closeSalesOrderItem(salesOrderId, itemId, uniqueId);
-                        continue;
-                    }
-
-                    if (pickQty === null || pickQty === undefined) {
-
-
-                        log.error('Invalid pickQty for sales order (must be greater than 0)', { salesOrderId: salesOrderId, pickQty: pickQty });
-                        continue;
-
-                    }
-                    if (!locationId) {
-                        log.error('Missing locationId for sales order', salesOrderId);
-                        continue;
-                    }
-
-                    var bulkStageBin = (locationId === 9) ? 4859 : 16692;
-
-                    // STEP 3: Load or create header
-                    headerId = existingMap[salesOrderId];
-                    log.error("headerId", headerId);
-                    var headerRec;
-
-
-                    if (salesOrderId) {
-                        const salesorderSearchObj = search.create({
-                            type: "salesorder",
-                            filters: [
-                                ["type", "anyof", "SalesOrd"],
-                                "AND",
-                                ["internalid", "anyof", salesOrderId],
-                                "AND",
-                                ["mainline", "is", "T"]
-                            ],
-                            columns: [
-                                search.createColumn({
-                                    name: "custentity_single_if",
-                                    join: "customer"
-                                })
-                            ]
-                        });
-
-                        salesorderSearchObj.run().each(function (result) {
-
-                            var singleIFValue = result.getValue({
-                                name: "custentity_single_if",
-                                join: "customer"
-                            });
-
-                            isSingleIf = singleIFValue === true || singleIFValue === 'T';
-
-                            return false; // Only one result expected
-                        });
-
-
-
-                    }
-
-                    if (headerId && isSingleIf) {
-
-                        // Reuse existing header ONLY when checkbox is checked
-                        headerRec = record.load({
-                            type: 'customrecord_order_fulfillment_details',
-                            id: headerId,
-                            isDynamic: true
-                        });
-
-                    } else {
-                        //  Create new header when:
-                        // - no headerId
-                        // - OR checkbox is unchecked
-                        headerId = null;
-                        headerRec = record.create({
-                            type: 'customrecord_order_fulfillment_details',
-                            isDynamic: true
-                        });
-
-                        headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
-                        headerRec.setValue('custrecord_jyswms_portal_id', portalId);
-                        headerRec.setValue('custrecord_jyswms_location_id', locationId);
-
-                        headerId = headerRec.save();
-
-                        // log.error("Created new header record", headerId);
-                    }
-
-                    savedHeaders.push(headerId);
-
-
-                    // STEP 4: Create Bin Transfer
-                    if (savedId) {
-                        log.error("savedId -- bintrnasferId", savedId);
-                    } else {
-
-                        try {
-
-                            var binTransferRec = record.create({ type: 'bintransfer', isDynamic: true });
-                            binTransferRec.setValue({ fieldId: 'subsidiary', value: 1 });
-                            binTransferRec.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-                            binTransferRec.setValue({ fieldId: 'memo', value: 'Bin Transfer via Restlet' });
-                            binTransferRec.setValue({ fieldId: 'location', value: locationId });
-                            binTransferRec.setValue({ fieldId: 'custbody_jyswms_item_unique_id', value: uniqueId });
-                            binTransferRec.setValue({ fieldId: 'custbody_wms_ai_pickername', value: pickerName });
-                            binTransferRec.setValue({ fieldId: 'custbody_realted_sales_order', value: salesOrderId });
-
-                            binTransferRec.selectNewLine({ sublistId: 'inventory' });
-                            binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
-                            binTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'quantity', value: pickQty });
-
-                            var inventoryDetail = binTransferRec.getCurrentSublistSubrecord({
-                                sublistId: 'inventory',
-                                fieldId: 'inventorydetail'
-                            });
-                            inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: binId });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: pickQty });
-                            inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'tobinnumber', value: bulkStageBin });
-                            inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
-
-                            binTransferRec.commitLine({ sublistId: 'inventory' });
-
-                            log.audit('BinTransfer Record - Before Save', {
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty,
-                                fromBin: binId,
-                                toBin: bulkStageBin
-                            });
-
-                            // Save bin transfer with error handling
-                            // var savedId = null;
-
-                            try {
-                                savedId = binTransferRec.save();
-                            } catch (e) {
-                                log.error("error saving bintransfer", e.message);
-                            }
-                            //  log.error("BinTransfer savedId", savedId);
-                        } catch (binTransferError) {
-                            log.error('Failed to save bin transfer', {
-                                error: binTransferError.message,
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty
-                            });
-                            // Bin transfer failed, but continue processing to create custom record line
-
-                        }
-                    }
-
-                    // STEP 5: Reload header record before adding lines (ensures fresh copy)
-                    // This is critical: ensures we have the latest version before adding sublist lines
-                    headerRec = record.load({
-                        type: 'customrecord_order_fulfillment_details',
-                        id: headerId,
-                        isDynamic: true
-                    });
-
-                    try {
-
-                        //   var singleIf = headerRec.getValue('custrecord_jywms_single_if_from_customer');
-                        if (isSingleIf == false || isSingleIf == 'F') {
-
-                            log.error("Single IF is false - auto-approving header", salesOrderId);
-
-                            record.submitFields({
-                                type: 'customrecord_order_fulfillment_details',
-                                id: headerId,
-                                values: {
-                                    custrecord_jyswms_is_partially_fulfilled: true,
-                                    custrecord_jyswms_approved: true,
-                                    custrecord_jyswmws_perform_update: true
-                                },
-                                options: {
-                                    enableSourcing: false,
-                                    ignoreMandatoryFields: true
-                                }
-                            });
-
-                        }
-
-                        record.submitFields({
-                            type: 'customrecord_order_fulfillment_details',
-                            id: headerId,
-                            values: {
-                                custrecord_jyswms_location_id: locationId
-                            },
-                            options: {
-                                enableSourcing: false,
-                                ignoreMandatoryFields: true
-                            }
-                        });
-
-                    } catch (error) {
-                        log.error("error message", error.message);
-                    }
-
-
-                    var itemRec = record.create({ type: 'customrecord_jyswms_sales_order_item', isDynamic: true });
-
-                    itemRec.setValue({ fieldId: 'custrecord_sales_order_header', value: headerId });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item', value: itemId });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_order_qty', value: so.quantity });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_picked_qty', value: pickQty });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_sales_order', value: salesOrderId });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_picked_bin', value: binId });
-                    itemRec.setValue({ fieldId: 'custrecord_jswms_item_so_item_qty', value: so.item_quantity });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_so_line_loc', value: locationId });
-
-                    // Initialize inventory adjustment ID
-                    var invAdjId = "";
-
-                    // Wrap entire negative inventory adjustment logic in try-catch block
-                    try {
-                        var soItemQuantity = so.quantity;
-                        // log.error("soItemQuantity", soItemQuantity);
-
-                        var userPickedQty = pickQty;
-                        //  log.error("userPickedQty", userPickedQty);
-
-                        // Calculate quantity difference
-                        var qtyDiff = soItemQuantity - userPickedQty;
-                        if (qtyDiff <= 0) {
-                            log.debug("No adjustment needed — fully picked");
-                            // Continue processing without adjustment
-                        } else {
-                            // Create inventory adjustment if there's a shortfall
-                            // var negativeQty = -qtyDiff;
-
-                            // new logic for fetching item quantity per bin details
-
-                            var negativeQty = '';
-                            const inventorybalanceSearchObj = search.create({
-                                type: "inventorybalance",
-                                filters:
-                                    [
-                                        ["item", "anyof", itemId],
-                                        "AND",
-                                        ["location", "anyof", locationId],
-                                        "AND",
-                                        ["available", "greaterthan", "0"],
-                                        "AND",
-                                        ["binnumber.custrecord_jyswms_exclude_from_inventory", "is", "F"],
-                                        "AND",
-                                        ["binnumber", "anyof", binId],
-                                        "AND",
-                                        ["binnumber.inactive", "is", "F"]
-                                    ],
-                                columns:
-                                    [
-                                        search.createColumn({
-                                            name: "onhand",
-                                            summary: "SUM",
-                                            label: "On Hand"
-                                        })
-                                    ]
-                            });
-                            inventorybalanceSearchObj.run().each(function (result) {
-                                var onHandQty = result.getValue({ name: "onhand", summary: "SUM" });
-                                negativeQty = -onHandQty;
-                                return true;
-                            });
-
-
-                            log.debug(" Negative inventory adjustment - NegativeQuanity : ", negativeQty);
-
-                            var inventoryAdjRec = record.create({
-                                type: record.Type.INVENTORY_ADJUSTMENT,
-                                isDynamic: true
-                            });
-
-                            // Set subsidiary (update if your account uses multiple)
-                            inventoryAdjRec.setValue({
-                                fieldId: 'subsidiary',
-                                value: 1
-                            });
-
-                            inventoryAdjRec.setValue({ fieldId: 'adjlocation', value: locationId });
-
-                            inventoryAdjRec.setValue({
-                                fieldId: 'account',
-                                value: 464 // update as needed
-                            });
-
-                            inventoryAdjRec.setValue({ fieldId: 'memo', value: 'Auto negative adjustment for bin: ' + binId });
-
-                            inventoryAdjRec.setValue({ fieldId: 'custbody_wms_ai_created_by', value: true });
-                            inventoryAdjRec.setValue({ fieldId: 'custbody_realted_jyorder', value: headerId });
-                            inventoryAdjRec.setValue({ fieldId: 'custbody_realted_sales_order', value: salesOrderId });
-                            var value = pickerName + " portal Id: " + portalId;
-                            inventoryAdjRec.setValue({ fieldId: 'custbody_wms_ai_pickername', value: value });
-
-                            // Add inventory line
-                            inventoryAdjRec.selectNewLine({ sublistId: 'inventory' });
-
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'item',
-                                value: itemId
-                            });
-
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'location',
-                                value: locationId
-                            });
-
-                            // Set quantity before inventory detail
-                            inventoryAdjRec.setCurrentSublistValue({
-                                sublistId: 'inventory',
-                                fieldId: 'adjustqtyby',
-                                value: negativeQty
-                            });
-
-                            // Lookup item properties safely
-                            var itemLookup = search.lookupFields({
-                                type: search.Type.ITEM,
-                                id: itemId,
-                                columns: ['usebins', 'recordtype']
-                            });
-
-                            // log.error('Item Lookup', JSON.stringify(itemLookup));
-
-                            var useBins =
-                                itemLookup.usebins === true ||
-                                itemLookup.usebins === 'T' ||
-                                (Array.isArray(itemLookup.usebins) && itemLookup.usebins[0] === 'T');
-
-                            var isInventoryItem =
-                                ['inventoryitem', 'serializedinventoryitem', 'lotnumberedinventoryitem'].includes(itemLookup.recordtype);
-
-                            if (useBins && isInventoryItem && binId) {
-                                try {
-                                    var invDetail = inventoryAdjRec.getCurrentSublistSubrecord({
-                                        sublistId: 'inventory',
-                                        fieldId: 'inventorydetail'
-                                    });
-
-                                    // 1.Remove existing inventory assignment lines
-                                    var existingLines = invDetail.getLineCount({ sublistId: 'inventoryassignment' });
-                                    for (var k = existingLines - 1; k >= 0; k--) {
-                                        invDetail.removeLine({ sublistId: 'inventoryassignment', line: k });
-                                    }
-                                    // log.error(" Cleared Existing Inventory Lines", existingLines);
-
-                                    // 2: Add new inventory assignment
-                                    invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-
-                                    invDetail.setCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'binnumber',
-                                        value: binId
-                                    });
-                                    invDetail.setCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'quantity',
-                                        value: negativeQty
-                                    });
-
-                                    // Step 3: Verify values before commit
-                                    var getBinID = invDetail.getCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'binnumber'
-                                    });
-                                    var getQty = invDetail.getCurrentSublistValue({
-                                        sublistId: 'inventoryassignment',
-                                        fieldId: 'quantity'
-                                    });
-
-
-                                    invDetail.commitLine({ sublistId: 'inventoryassignment' });
-                                    log.audit(" Inventory Assignment Added", "Bin: " + binId + ", Qty: " + negativeQty);
-
-                                } catch (invDetailError) {
-                                    log.error("Inventory Detail Creation Failed", invDetailError.name + " | " + invDetailError.message);
-                                    // Continue with adjustment even if inventory detail fails
-                                }
-                            } else {
-                                log.error("Skipping inventory detail — missing bin or not inventory-managed");
-                            }
-
-                            inventoryAdjRec.commitLine({ sublistId: 'inventory' });
-
-                            var summary = {
-                                itemId: itemId,
-                                binId: binId,
-                                locationId: locationId,
-                                negativeQty: negativeQty
-                            };
-
-
-                            // Save record
-                            invAdjId = inventoryAdjRec.save({
-                                enableSourcing: true,
-                                ignoreMandatoryFields: true
-                            });
-
-                            log.error(" Inventory Adjustment Created Successfully - MarkAsPicked : ", invAdjId);
-                        }
-                    } catch (negativeInvError) {
-                        log.error(" Negative Inventory Adjustment Error", {
-                            error: negativeInvError.name + " | " + negativeInvError.message,
-                            salesOrderId: salesOrderId,
-                            itemId: itemId,
-                            pickQty: pickQty
-                        });
-                        // Continue processing even if adjustment fails - invAdjId remains null
-                    }
-
-                    // Set bin transfer ID and inventory adjustment ID on the line
-                    // Only set bin transfer ID if bin transfer was successful
-                    if (savedId) {
-
-                        itemRec.setValue({ fieldId: 'custrecord_item_bintransfer_id', value: savedId });
-
-                        savedTransfers.push(savedId);
-
-                    }
-
-                    if (invAdjId) {
-
-                        itemRec.setValue({ fieldId: 'custrecord_jyswms_item_inv_adjy', value: invAdjId });
-
-                    }
-
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_uniqueid', value: uniqueId });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_portal_id', value: portalId });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_picker_name', value: pickerName });
-                    itemRec.setValue({ fieldId: 'custrecord_jyswms_item_tracking_numbers', value: trackingNumbers.length || 0 });
-                    var itemRecId = itemRec.save();
-                    itemLines.push(itemRecId);
-
-                    // STEP 7: Add tracking sublist lines lines
-                    // log.error('Tracking Numbers', trackingNumbers);
-
-                    trackingNumbers.forEach(function (track) {
-
-                        // if (!track || !track.ssccCode) {
-                        //     log.error("Skipping – SSCC missing", track);
-                        //     return;
-                        // }
-                        if (!track) {
-                            log.error("Skipping – track missing", track);
-                            return;
-                        }
-
-                        // CHECK IN SUBLIST (not input array)
-                        if (ssccExistsInSublist(headerRec, track.ssccCode)) {
-                            log.error("Skipping trackingLines – SSCC already exists in sublist", track.ssccCode);
-                            return;
-                        }
-
-
-                        log.error("track -- tracking line", track);
-
-
-                        var trackRec = record.create({
-                            type: 'customrecord_jyswms_sales_order_track', //replace with your actual tracking custom record ID
-                            isDynamic: true
-                        });
-
-                        trackRec.setValue({ fieldId: 'custrecord_jyswms_so_header', value: headerId });
-                        trackRec.setValue({ fieldId: 'custrecord_jyswms_track_item', value: itemId });
-                        trackRec.setValue({ fieldId: 'custrecord_jyswms_track_number', value: track.ssccCode });
-                        trackRec.setValue({ fieldId: 'custrecord_jyswms_track_so_id', value: salesOrderId });
-                        trackRec.setValue({ fieldId: 'custrecord_jyswms_track_qty', value: 1 });
-                        trackRec.setValue({ fieldId: 'custrecord_jyswms_track_uniqueid', value: uniqueId });
-                        trackRec.setValue({
-                            fieldId: 'custrecord_jyswms_track_dropship',
-                            value: track.trackingNumber || ' '
-                        });
-
-                        var trackingRecId = trackRec.save({
-                            enableSourcing: true,
-                            ignoreMandatoryFields: false
-                        });
-
-                        log.error("trackingRecId", trackingRecId);
-                        trackingLines.push(trackingRecId);
-
-                    });
-
-
-
-                    // trackingNumbers.forEach(function (track) {
-
-                    //     // if (!track || !track.ssccCode) {
-                    //     //     log.error("Skipping – SSCC missing", track);
-                    //     //     return;
-                    //     // }
-
-
-                    //     if (!track) {
-                    //         log.error("Skipping – track missing", track);
-                    //         return;
-                    //     }
-
-                    //     // CHECK IN SUBLIST (not input array)
-                    //     if (ssccExistsInSublist(headerRec, track.ssccCode)) {
-                    //         log.error("Skipping packageRec – SSCC already exists in sublist", track.ssccCode);
-                    //         return;
-                    //     }
-
-
-                    //     log.error("track", track);
-
-                    //     var packageRec = record.create({
-                    //         type: 'customrecordhj_tc_package_contents',
-                    //         isDynamic: true
-                    //     });
-                    //     packageRec.setValue({
-                    //         fieldId: 'custrecord_jyswms_createdfrom',
-                    //         value: true
-                    //     });
-
-                    //     packageRec.setValue({
-                    //         fieldId: 'custrecord_jyswms_related_cif',
-                    //         value: headerId
-                    //     });
-
-                    //     // SSCC code
-                    //     packageRec.setValue({
-                    //         fieldId: 'custrecordhj_ucc',
-                    //         value: track.ssccCode || ''
-                    //     });
-
-                    //     // Tracking number
-                    //     packageRec.setValue({
-                    //         fieldId: 'custrecordhj_pkg_trackingnumber',
-                    //         value: track.trackingNumber || ''
-                    //     });
-
-                    //     // If you want to link to fulfillment/parent record and you have the field, uncomment and set correct field id:
-                    //     // packageRec.setValue({ fieldId: 'custrecord_hj_packagecontents_sublist', value: fulfillmentId });
-
-                    //     packageRec.setValue({
-                    //         fieldId: 'custrecord_jyswms_item_id',
-                    //         value: itemId
-                    //     });
-
-                    //     var itemLookup = search.lookupFields({
-                    //         type: search.Type.ITEM,
-                    //         id: itemId,
-                    //         columns: ['weight']
-                    //     });
-
-                    //     var itemWeight = parseFloat(itemLookup.weight) || 0;
-                    //     var finalWeight = itemWeight;
-
-                    //     packageRec.setValue({
-                    //         fieldId: 'custrecordhj_tc_packagecontentslbs',
-                    //         value: finalWeight
-                    //     });
-
-                    //     var itemText = packageRec.getText({
-                    //         fieldId: 'custrecord_jyswms_item_id'
-                    //     });
-
-
-                    //     var package_Content = itemText + "/1";
-                    //     // Tracking number
-                    //     packageRec.setValue({
-                    //         fieldId: 'custrecordhj_pkg_desc',
-                    //         value: package_Content
-                    //     });
-
-                    //     packageRec.selectNewLine({
-                    //         sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent'
-                    //     });
-
-                    //     packageRec.setCurrentSublistValue({
-                    //         sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent',
-                    //         fieldId: 'custrecordhj_tc_pkgcontents_lineitemitem',
-                    //         value: itemId
-                    //     });
-
-                    //     packageRec.commitLine({
-                    //         sublistId: 'recmachcustrecordhj_tc_pkgcont_lineitemparent'
-                    //     });
-
-                    //     var packageId = packageRec.save({
-                    //         enableSourcing: true,
-                    //         ignoreMandatoryFields: false
-                    //     });
-
-                    //     packageLines.push(packageId);
-
-                    // });
-
-
-                    var soLookup = search.lookupFields({
-                        type: 'salesorder',
-                        id: salesOrderId,
-                        columns: ['custbody_so_total_qty']
-                    });
-                    var totalSOQty = Number(soLookup.custbody_so_total_qty) || 0;
-
-                    //  Calculate total picked quantity from all item lines
-                    var totalPickedQty = 0;
-                    var lineCount = headerRec.getLineCount({ sublistId: 'recmachcustrecord_sales_order_header' });
-
-                    for (var l = 0; l < lineCount; l++) {
-                        var linePicked = Number(headerRec.getSublistValue({
-                            sublistId: 'recmachcustrecord_sales_order_header',
-                            fieldId: 'custrecord_jyswms_item_picked_qty',
-                            line: l
-                        })) || 0;
-                        totalPickedQty += linePicked;
-                    }
-
-                    if (totalPickedQty == 0) {
-                        totalPickedQty = pickQty;
-                    }
-
-                    // Calculate approval
-                    var isApproved = (totalSOQty <= totalPickedQty);
-
-                    // Build values object
-                    var updateValues = {
-                        custrecord_jyswms_total_so_qty: totalSOQty,
-                        custrecord_jyswms_total_pick_qty: totalPickedQty
-                    };
-
-                    //    if (isSingleIf == true || isSingleIf == 'T') {
-                    updateValues.custrecord_jyswms_approved = true;
-                    //    }
-
-                    log.error('Header Totals and Approval', {
-                        totalSOQty: totalSOQty,
-                        totalPickedQty: totalPickedQty,
-                        approved: isApproved
-                    });
-
-                    // Update header using submitFields
-                    try {
-
-                        record.submitFields({
-                            type: 'customrecord_order_fulfillment_details',
-                            id: headerId,
-                            values: updateValues,
-                            options: {
-                                enableSourcing: false,
-                                ignoreMandatoryFields: true
-                            }
-                        });
-
-                        existingMap[salesOrderId] = headerId;
-
-                    } catch (headerSaveError) {
-
-                        log.error('Failed to update header record', {
-                            error: headerSaveError.message,
-                            salesOrderId: salesOrderId,
-                            headerId: headerId
-                        });
-
-                        continue;
-                    }
-
-                    // Save header record with error handling
-                    try {
-                        //  headerId = headerRec.save();
-                        // log.error("Saved Header", headerId);
-                        existingMap[salesOrderId] = headerId;
-
-                        // Add to response arrays for each sales order
-                        // Only add bin transfer ID if bin transfer was successful
-                        // if (savedId) {
-                        //     savedTransfers.push(savedId);
-                        // }
-                        // savedHeaders.push(headerId);
-
-
-                    } catch (headerSaveError) {
-                        log.error('Failed to save header record', {
-                            error: headerSaveError.message,
-                            salesOrderId: salesOrderId,
-                            headerId: headerId,
-                            savedTransfers: savedTransfers,
-                            savedHeaders: savedHeaders,
-                            itemLines: itemLines,
-                            trackingLines: trackingLines,
-                            packageLines: packageLines
-                        });
-                        // Continue to next sales order instead of failing entire batch
-                        continue;
-                    }
-                }
-
-                log.audit("MarkAsPicked", "savedTransfers: " + JSON.stringify(savedTransfers) + ", savedHeaders: " + JSON.stringify(savedHeaders));
-
-            }
-
-            // Build expected JSON response
-            const expectedResponse = {
-                status: 'success',
-                message: 'Items & tracking numbers processed successfully',
-                binTransferId: savedTransfers,
-                customRecID: savedHeaders,
-                itemLines: itemLines,
-                trackingLines: trackingLines,
-                packageLines: packageLines
-            };
-
-            // Log the expected JSON response
-            log.debug('Expected JSON Response - MarkASpicked', JSON.stringify(expectedResponse));
-
-            return expectedResponse;
-
-        }
-        catch (e) {
-            log.error('POST Error', e);
-            if (headerId) {
-                record.submitFields({
-                    type: 'customrecord_order_fulfillment_details',
-                    id: headerId,
-                    values: {
-                        custrecord_jyswms_error: e.message,
-                        custrecord_jyswms_item_error_: e.message
-                    }
-                });
-            }
-            return { status: 'error', message: e.message };
         }
     }
 
@@ -3998,8 +1909,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                                 type: 'customrecord_order_fulfillment_details',
                                 id: headerId,
                                 values: {
-                                    // custrecord_jyswms_is_partially_fulfilled: true,
-                                    // custrecord_jyswms_approved: true,
+                                    custrecord_jyswms_is_partially_fulfilled: true,
+                                    custrecord_jyswms_approved: true,
                                     custrecord_jyswmws_perform_update: true
                                 },
                                 options: {
@@ -4451,326 +2362,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
             return { status: 'error', message: e.message };
         }
     }
-
-
-    // function markAsPickedGroup(requestBody, jyswmsApiCustRecId) {
-
-    //     var savedTransfers = [];
-    //     var savedHeaders = [];
-    //     var itemLines = [];
-    //     var trackingLines = [];
-    //     var packageLines = [];
-
-    //     var existingMap = {}; // FIXED: moved outside loop
-
-    //     try {
-
-    //         if (!requestBody || !Array.isArray(requestBody.data)) {
-    //             return { status: 'error', message: 'Invalid request body structure' };
-    //         }
-
-    //         var binMap = getBinNameToIdMap();
-
-    //         for (var d = 0; d < requestBody.data.length; d++) {
-
-    //             var Data = requestBody.data[d];
-    //             var salesOrders = Data.salesOrders || [];
-
-    //             if (!salesOrders.length) continue;
-
-    //             for (var i = 0; i < salesOrders.length; i++) {
-
-    //                 var so = salesOrders[i];
-    //                 var salesOrderId = so.salesOrderId;
-    //                 if (!salesOrderId) continue;
-
-    //                 var itemId = so.itemInternalId;
-    //                 var pickQty = Number(so.picked_quantity || 0);
-    //                 var uniqueId = so.unique_id || '';
-    //                 var portalId = requestBody.portalId;
-    //                 var pickerName = requestBody.userName;
-
-    //                 if (!itemId || !pickQty) continue;
-
-    //                 var binId = Data.binInternalId || binMap[Data.bin];
-    //                 var locationId = Data.locationId || null;
-
-    //                 if (!locationId && binId) {
-    //                     var lookup = search.lookupFields({
-    //                         type: search.Type.BIN,
-    //                         id: binId,
-    //                         columns: ['location']
-    //                     });
-    //                     locationId = lookup.location[0].value;
-    //                 }
-
-    //                 if (!locationId) continue;
-
-    //                 var bulkStageBin = (locationId == 9) ? 4859 : 16692;
-
-    //                 // -----------------------------
-    //                 // HEADER RESOLUTION LOGIC
-    //                 // -----------------------------
-
-    //                 var headerId = existingMap[salesOrderId] || findExistingHeader(salesOrderId);
-    //                 var headerRec;
-
-    //                 if (headerId) {
-
-    //                     headerRec = record.load({
-    //                         type: 'customrecord_order_fulfillment_details',
-    //                         id: headerId,
-    //                         isDynamic: true
-    //                     });
-
-    //                 } else {
-
-    //                     headerRec = record.create({
-    //                         type: 'customrecord_order_fulfillment_details',
-    //                         isDynamic: true
-    //                     });
-
-    //                     headerRec.setValue('custrecord_jyswms_sales_order_id', salesOrderId);
-    //                     headerRec.setValue('custrecord_jyswms_portal_id', portalId);
-    //                     headerRec.setValue('custrecord_jyswms_location_id', locationId);
-
-    //                     headerId = headerRec.save();
-    //                 }
-
-    //                 existingMap[salesOrderId] = headerId;
-    //                 savedHeaders.push(headerId);
-
-    //                 // -----------------------------
-    //                 // BIN TRANSFER
-    //                 // -----------------------------
-
-    //                 var binTransferId = null;
-
-    //                 try {
-
-    //                     var binTransferRec = record.create({
-    //                         type: 'bintransfer',
-    //                         isDynamic: true
-    //                     });
-
-    //                     binTransferRec.setValue('subsidiary', 1);
-    //                     binTransferRec.setValue('location', locationId);
-    //                     binTransferRec.setValue('custbody_realted_sales_order', salesOrderId);
-    //                     binTransferRec.setValue('custbody_wms_ai_pickername', pickerName);
-    //                     binTransferRec.setValue('custbody_jyswms_item_unique_id', uniqueId);
-
-    //                     binTransferRec.selectNewLine({ sublistId: 'inventory' });
-    //                     binTransferRec.setCurrentSublistValue({
-    //                         sublistId: 'inventory',
-    //                         fieldId: 'item',
-    //                         value: itemId
-    //                     });
-    //                     binTransferRec.setCurrentSublistValue({
-    //                         sublistId: 'inventory',
-    //                         fieldId: 'quantity',
-    //                         value: pickQty
-    //                     });
-
-    //                     var invDetail = binTransferRec.getCurrentSublistSubrecord({
-    //                         sublistId: 'inventory',
-    //                         fieldId: 'inventorydetail'
-    //                     });
-
-    //                     invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-    //                     invDetail.setCurrentSublistValue({
-    //                         sublistId: 'inventoryassignment',
-    //                         fieldId: 'binnumber',
-    //                         value: binId
-    //                     });
-    //                     invDetail.setCurrentSublistValue({
-    //                         sublistId: 'inventoryassignment',
-    //                         fieldId: 'quantity',
-    //                         value: pickQty
-    //                     });
-    //                     invDetail.setCurrentSublistValue({
-    //                         sublistId: 'inventoryassignment',
-    //                         fieldId: 'tobinnumber',
-    //                         value: bulkStageBin
-    //                     });
-    //                     invDetail.commitLine({ sublistId: 'inventoryassignment' });
-
-    //                     binTransferRec.commitLine({ sublistId: 'inventory' });
-
-    //                     binTransferId = binTransferRec.save();
-
-    //                     savedTransfers.push(binTransferId);
-
-    //                 } catch (e) {
-    //                     log.error('Bin Transfer Failed', e);
-    //                 }
-
-    //                 // -----------------------------
-    //                 // ITEM LINE RECORD
-    //                 // -----------------------------
-
-    //                 var itemRec = record.create({
-    //                     type: 'customrecord_jyswms_sales_order_item',
-    //                     isDynamic: true
-    //                 });
-
-    //                 itemRec.setValue('custrecord_sales_order_header', headerId);
-    //                 itemRec.setValue('custrecord_jyswms_item', itemId);
-    //                 itemRec.setValue('custrecord_jyswms_item_picked_qty', pickQty);
-    //                 itemRec.setValue('custrecord_jyswms_sales_order', salesOrderId);
-    //                 itemRec.setValue('custrecord_jyswms_item_uniqueid', uniqueId);
-
-    //                 if (binTransferId) {
-    //                     itemRec.setValue('custrecord_item_bintransfer_id', binTransferId);
-    //                 }
-
-    //                 var itemRecId = itemRec.save();
-    //                 itemLines.push(itemRecId);
-
-    //                 // -----------------------------
-    //                 // NEGATIVE INVENTORY ADJUSTMENT (FIXED)
-    //                 // -----------------------------
-
-    //                 var soQty = Number(so.quantity || 0);
-    //                 var diff = soQty - pickQty;
-
-    //                 if (diff > 0) {
-
-    //                     var negativeQty = -diff; // FIXED LOGIC
-
-    //                     try {
-
-    //                         var adjRec = record.create({
-    //                             type: record.Type.INVENTORY_ADJUSTMENT,
-    //                             isDynamic: true
-    //                         });
-
-    //                         adjRec.setValue('subsidiary', 1);
-    //                         adjRec.setValue('adjlocation', locationId);
-    //                         adjRec.setValue('account', 464);
-
-    //                         adjRec.selectNewLine({ sublistId: 'inventory' });
-    //                         adjRec.setCurrentSublistValue({
-    //                             sublistId: 'inventory',
-    //                             fieldId: 'item',
-    //                             value: itemId
-    //                         });
-    //                         adjRec.setCurrentSublistValue({
-    //                             sublistId: 'inventory',
-    //                             fieldId: 'adjustqtyby',
-    //                             value: negativeQty
-    //                         });
-
-    //                         var invSub = adjRec.getCurrentSublistSubrecord({
-    //                             sublistId: 'inventory',
-    //                             fieldId: 'inventorydetail'
-    //                         });
-
-    //                         invSub.selectNewLine({ sublistId: 'inventoryassignment' });
-    //                         invSub.setCurrentSublistValue({
-    //                             sublistId: 'inventoryassignment',
-    //                             fieldId: 'binnumber',
-    //                             value: binId
-    //                         });
-    //                         invSub.setCurrentSublistValue({
-    //                             sublistId: 'inventoryassignment',
-    //                             fieldId: 'quantity',
-    //                             value: negativeQty
-    //                         });
-    //                         invSub.commitLine({ sublistId: 'inventoryassignment' });
-
-    //                         adjRec.commitLine({ sublistId: 'inventory' });
-
-    //                         var adjId = adjRec.save();
-
-    //                         record.submitFields({
-    //                             type: 'customrecord_jyswms_sales_order_item',
-    //                             id: itemRecId,
-    //                             values: {
-    //                                 custrecord_jyswms_item_inv_adjy: adjId
-    //                             }
-    //                         });
-
-    //                     } catch (e) {
-    //                         log.error('Negative Adjustment Failed', e);
-    //                     }
-    //                 }
-
-    //                 // -----------------------------
-    //                 // TRACKING EXTRACTION (FIXED)
-    //                 // -----------------------------
-
-    //                 var trackingList = [];
-    //                 var ssccList = [];
-
-    //                 if (Array.isArray(so.labelData)) {
-    //                     so.labelData.forEach(function (l) {
-    //                         if (l.tracking_number) {
-    //                             trackingList.push(l.tracking_number);
-    //                         }
-    //                     });
-    //                 }
-
-    //                 if (Array.isArray(so.labelData2)) {
-    //                     so.labelData2.forEach(function (l) {
-    //                         if (l.sscc_code) {
-    //                             ssccList.push(l.sscc_code);
-    //                         }
-    //                     });
-    //                 }
-
-    //                 var pairCount = Math.min(trackingList.length, ssccList.length);
-
-    //                 for (var t = 0; t < pairCount; t++) {
-
-    //                     var trackRec = record.create({
-    //                         type: 'customrecord_jyswms_sales_order_track',
-    //                         isDynamic: true
-    //                     });
-
-    //                     trackRec.setValue('custrecord_jyswms_so_header', headerId);
-    //                     trackRec.setValue('custrecord_jyswms_track_item', itemId);
-    //                     trackRec.setValue('custrecord_jyswms_track_number', ssccList[t]);
-    //                     trackRec.setValue('custrecord_jyswms_track_dropship', trackingList[t]);
-
-    //                     trackingLines.push(trackRec.save());
-    //                 }
-
-    //                 // -----------------------------
-    //                 // HEADER TOTAL RECALCULATION (FIXED)
-    //                 // -----------------------------
-
-    //                 var totalPickedQty = getTotalPickedQty(headerId);
-
-    //                 record.submitFields({
-    //                     type: 'customrecord_order_fulfillment_details',
-    //                     id: headerId,
-    //                     values: {
-    //                         custrecord_jyswms_total_pick_qty: totalPickedQty
-    //                     }
-    //                 });
-    //             }
-    //         }
-
-    //         return {
-    //             status: 'success',
-    //             binTransferId: savedTransfers,
-    //             customRecID: savedHeaders,
-    //             itemLines: itemLines,
-    //             trackingLines: trackingLines,
-    //             packageLines: packageLines
-    //         };
-
-    //     } catch (e) {
-
-    //         log.error('POST Error', e);
-    //         return { status: 'error', message: e.message };
-    //     }
-    // }
-
-    // -----------------------------------------------------
-    // HELPER FUNCTIONS
-    // -----------------------------------------------------
-
     function findExistingHeader(salesOrderId) {
 
         var headerId = null;
@@ -4814,10 +2405,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
         return total;
     }
-
-
-
-
     function getBinNameToIdMap() {
         try {
             var binMap = {};
@@ -4875,11 +2462,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
         return false;
     }
-
-
-
-
-
     /**
    * Treat various truthy inputs (boolean true, "true", "True", "1") as true.
    */
@@ -4929,21 +2511,21 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
             if (closedLines.length > 0) {
                 var updatedId = soRec.save();
-                log.audit('Closed SO item lines', {
-                    salesOrderId: salesOrderId,
-                    itemId: itemId,
-                    lines: closedLines,
-                    uniqueId: uniqueId,
-                    savedId: updatedId
-                });
+                // log.audit('Closed SO item lines', {
+                //     salesOrderId: salesOrderId,
+                //     itemId: itemId,
+                //     lines: closedLines,
+                //     uniqueId: uniqueId,
+                //     savedId: updatedId
+                // });
                 return true;
             }
 
-            log.error('No matching item lines to close', {
-                salesOrderId: salesOrderId,
-                itemId: itemId,
-                uniqueId: uniqueId
-            });
+            // log.error('No matching item lines to close', {
+            //     salesOrderId: salesOrderId,
+            //     itemId: itemId,
+            //     uniqueId: uniqueId
+            // });
             return false;
         } catch (e) {
             log.error('Failed to close SO item lines', {
@@ -5020,13 +2602,13 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     internal_id: result.getValue({ name: 'internalid' }),
                     status: result.getText({ name: 'statusref' }),
                     priority: result.getValue({
-         name: "formulanumeric",
-         formula: "CASE     WHEN {custbody_pick_now_urgent} = 'T' THEN 1    ELSE {custbody_opt_ship_priority}END",
-         label: "priority"
-      }),
+                        name: "formulanumeric",
+                        formula: "CASE     WHEN {custbody_pick_now_urgent} = 'T' THEN 1    ELSE {custbody_opt_ship_priority}END",
+                        label: "priority"
+                    }),
                     location: result.getText({ name: 'location' }),
                     vridNumber: result.getText({ name: 'custbody_jyswms_vrid_number' }),
-                    pickupDate : result.getValue({name:'custbody_scheduled_pickup_date'})
+                    pickupDate: result.getValue({ name: 'shipdate' })
                 });
             });
 
@@ -5061,191 +2643,6 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
         }
     }
 
-
-    function FullFillOrders(context, id) {
-        log.error("fullfillorders");
-        return true;
-    }
-
-    //Sample functions not used
-    function getTrackingNumbers(context, pageSize, startIndex) {
-        try {
-            var ScriptStartTime = new Date().getTime();
-            log.debug('Script Started', 'Start Time: ' + ScriptStartTime / 1000 + ' seconds');
-
-            var scriptObj = runtime.getCurrentScript();
-            var TrackingNumberSearchId = scriptObj.getParameter({
-                name: 'custscript_wms_ai_tracking_number_search'
-            });
-            log.debug('Tracking Number Parameter', TrackingNumberSearchId);
-            var Data = {};
-
-            var TrackingNumberSearch = search.load({
-                id: TrackingNumberSearchId
-            });
-
-            // Get total count using runPaged().count
-            var totalCount = TrackingNumberSearch.runPaged().count;
-            var totalPages = Math.ceil(totalCount / pageSize);
-
-            // Apply pagination
-            var searchResult = TrackingNumberSearch.run();
-            var searchRange = searchResult.getRange({
-                start: startIndex,
-                end: startIndex + pageSize
-            });
-
-            searchRange.forEach(function (result) {
-                var internalId = result.getValue({
-                    name: 'internalid'
-                });
-                var salesOrderId = result.getValue({
-                    name: 'custrecord_tracking_number'
-                });
-
-                var recordData = {};
-
-                result.columns.forEach(function (column) {
-                    var columnName = toSnakeCase(column.label || column.name);
-                    recordData[columnName] = result.getText(column) || result.getValue(column);
-                });
-                Data[salesOrderId] = recordData;
-            });
-
-            var ScriptEndTime = new Date().getTime();
-            // log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
-
-
-
-            return {
-                status: 200,
-                message: 'Data retrieved successfully',
-                summary: {
-                    total_records: totalCount,
-                    total_pages: totalPages,
-                    records_per_page: pageSize,
-                    current_page: Math.floor(startIndex / pageSize) + 1,
-                    pagination_info: {
-                        start_index: startIndex,
-                        end_index: startIndex + pageSize - 1,
-                        has_next_page: (startIndex + pageSize) < totalCount,
-                        has_previous_page: startIndex > 0
-                    }
-                },
-                data: Data
-            };
-
-        } catch (e) {
-            log.error("error message", e.message);
-            return {
-                status: 500,
-                message: e.message
-            };
-        }
-    }
-
-    function getUsers(context, pageSize, startIndex) {
-        try {
-            var ScriptStartTime = new Date().getTime();
-            log.debug('Script Started', 'Start Time: ' + ScriptStartTime / 1000 + ' seconds');
-
-            var scriptObj = runtime.getCurrentScript();
-            var UserSearchId = scriptObj.getParameter({
-                name: 'custscript_wms_ai_user_data_search'
-            });
-            log.debug('User Parameter', UserSearchId);
-            var Data = {};
-
-            var UserSearch = search.load({
-                id: UserSearchId
-            });
-
-            // Get total count using runPaged().count
-            var totalCount = UserSearch.runPaged().count;
-            var totalPages = Math.ceil(totalCount / pageSize);
-
-            // Apply pagination
-            var searchResult = UserSearch.run();
-            var searchRange = searchResult.getRange({
-                start: startIndex,
-                end: startIndex + pageSize
-            });
-
-            var locationSearch = search.create({
-                type: search.Type.LOCATION,
-                filters: [
-                    ['isinactive', 'is', 'F']
-                ],
-                columns: ['internalid', 'name']
-            });
-
-            var locationResults = locationSearch.run().getRange({
-                start: 0,
-                end: 1000
-            });
-            var allLocations = locationResults.map(function (loc) {
-                return {
-                    location_id: loc.getValue({
-                        name: 'internalid'
-                    }),
-                    location_name: loc.getValue({
-                        name: 'name'
-                    })
-                };
-            });
-
-            searchRange.forEach(function (result) {
-                var internalId = result.getValue({
-                    name: 'internalid'
-                });
-                var recordData = {};
-
-                result.columns.forEach(function (column) {
-                    var columnName = toSnakeCase(column.label || column.name);
-                    recordData[columnName] = result.getText(column) || result.getValue(column);
-                });
-                Data[internalId] = recordData;
-                recordData['locations'] = allLocations;
-            });
-
-            var ScriptEndTime = new Date().getTime();
-            //log.debug('Total Execution Time', ((ScriptEndTime - ScriptStartTime) / 1000) + ' seconds');
-
-            return {
-                status: 200,
-                message: 'Data retrieved successfully',
-                summary: {
-                    total_records: totalCount,
-                    total_pages: totalPages,
-                    records_per_page: pageSize,
-                    current_page: Math.floor(startIndex / pageSize) + 1,
-                    pagination_info: {
-                        start_index: startIndex,
-                        end_index: startIndex + pageSize - 1,
-                        has_next_page: (startIndex + pageSize) < totalCount,
-                        has_previous_page: startIndex > 0
-                    }
-                },
-                data: Data
-            };
-
-        } catch (e) {
-            log.error("error message", e.message);
-
-            return {
-                status: 500,
-                message: e.message
-            };
-        }
-    }
-
-    function toSnakeCase(str) {
-        return str
-            .trim()
-            .replace(/[^a-zA-Z0-9 ]/g, '')
-            .replace(/\s+/g, '_')
-            .toLowerCase();
-    }
 
     return {
         get: get,

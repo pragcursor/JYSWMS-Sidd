@@ -1,152 +1,86 @@
 /**
- * @NApiVersion 2.0
+ * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
-define(['N/record', 'N/search', 'N/format'],
-    function(record, search, format) {
-        function afterSubmit(context) {
-            try {
-              
-				var oldRecord = context.oldRecord;
-                var internalId = context.newRecord.id;
-                var recType = context.newRecord.type
-                var l41LocQty = 0,
-                    l60locQty = 0;
+define(['N/record', 'N/search'], (record, search) => {
 
-                var itemRec = record.load({
-                    type: recType,
-                    id: internalId
-                })
-              
-				var manufacturer_tariff = itemRec.getValue({
-                    fieldId: 'manufacturertariff'
-                })
+    const afterSubmit = (context) => {
+        try {
 
-                var days_Sales_Goal = itemRec.getValue({
-                    fieldId: 'custitem_30d_sales_goal'
-                })
+            const internalId = context.newRecord.id;
+            const recType = context.newRecord.type;
 
-				days_Sales_Goal = Number(days_Sales_Goal) * 4
+            // Location → Field mapping
+            const locationFieldMap = {
+                "9": "custitem_l41_inventory_on_hand",
+                "15": "custitem_l60_inventory_on_hand"
+            };
 
-                var itemSearchObj = search.create({
-                    type: "item",
-                    filters: [
-                        ["binonhand.binnumber", "noneof", "17066", "17064", "7573", "4859", "7586", "7565", "1206", "1408", "16692", "16734", "2633", "4672", "16691", "16727", "16733", "16735", "4964", "4963", "1410", "1408", "16727","17373"],//"7575", "7577", "7578", "7579", "7580", "7581", "7582", "7583", "7584", "7585"
-                        "AND",
-                        ["binonhand.location", "anyof", "9"],
-                        "AND",
-                        ["internalid", "anyof", internalId]
-                    ],
-                    columns: [
-                        search.createColumn({
-                            name: "internalid",
-                            summary: "GROUP",
-                            label: "Internal ID"
-                        }),
+            // Initialize values
+            let values = {
+                custitem_l41_inventory_on_hand: 0,
+                custitem_l60_inventory_on_hand: 0
+            };
 
-                        search.createColumn({
-                            name: "itemid",
-                            summary: "GROUP",
-                            sort: search.Sort.ASC,
-                            label: "Name"
-                        }),
+            // ❗ YOUR ITEM SEARCH (fixed)
+            const itemSearchObj = search.create({
+                type: "item",
+                filters: [
+                    ["type","anyof","InvtPart"],
+                    "AND",
+                    ["inventorylocation","anyof","9","15"],
+                    "AND",
+                    ["internalid","anyof", internalId]
+                ],
+                columns: [
+                    search.createColumn({name: "inventorylocation"}),
+                    search.createColumn({name: "locationquantityavailable"})
+                ]
+            });
 
-                        search.createColumn({
-                            name: "quantityavailable",
-                            join: "binOnHand",
-                            summary: "SUM",
-                            label: "Quantity Available"
-                        })
-                    ]
+            itemSearchObj.run().each(result => {
+
+                const locationId = result.getValue({
+                    name: "inventorylocation"
                 });
 
-                var searchResultCount = itemSearchObj.runPaged().count;
-                log.debug("itemSearchObj result count", searchResultCount);
-                itemSearchObj.run().each(function(result) {
-                    // .run().each has a limit of 4,000 results
-                    l41LocQty = result.getValue({
-                        name: "quantityavailable",
-                        join: "binOnHand",
-                        summary: "SUM"
-                    })
+                const qty = parseFloat(result.getValue({
+                    name: "locationquantityavailable"
+                })) || 0;
 
-                    return true;
-                });
+                const fieldId = locationFieldMap[locationId];
 
+                if (fieldId) {
+                    values[fieldId] = qty;
+                }
 
-                var itemSearchObj = search.create({
-                    type: "item",
-                    filters: [
-                        ["binonhand.binnumber", "noneof", "17066", "17064", "7573", "4859", "7586", "7565", "1206", "1408", "16692", "16734", "2633", "4672", "16691", "16727", "16733", "16735", "4964", "4963",  "1410", "1408", "16727","17373"],//"7575", "7577", "7578", "7579", "7580", "7581", "7582", "7583", "7584", "7585",
-                        "AND",
-                        ["binonhand.location", "anyof", "15"],
-                        "AND",
-                        ["internalid", "anyof", internalId]
-                    ],
+                return true;
+            });
 
-                    columns: [
+            // ✅ Update item fields
+            record.submitFields({
+                type: recType,
+                id: internalId,
+                values: {
+                    custitem_l41_inventory_on_hand: Math.floor(values.custitem_l41_inventory_on_hand),
+                    custitem_l60_inventory_on_hand: Math.floor(values.custitem_l60_inventory_on_hand)
+                },
+                options: {
+                    enableSourcing: false,
+                    ignoreMandatoryFields: true
+                }
+            });
+            log.error('Updated Item', {
+                itemId: internalId,
+                newL41: Math.floor(values.custitem_l41_inventory_on_hand),
+                newL60: Math.floor(values.custitem_l60_inventory_on_hand)
+            });
 
-                        search.createColumn({
-                            name: "internalid",
-                            summary: "GROUP",
-                            label: "Internal ID"
-                        }),
-
-                        search.createColumn({
-                            name: "itemid",
-                            summary: "GROUP",
-                            sort: search.Sort.ASC,
-                            label: "Name"
-                        }),
-
-                        search.createColumn({
-                            name: "quantityavailable",
-                            join: "binOnHand",
-                            summary: "SUM",
-                            label: "Quantity Available"
-                        })
-
-                    ]
-                });
-                var searchResultCount = itemSearchObj.runPaged().count;
-              //  log.debug("itemSearchObj result count", searchResultCount);
-                itemSearchObj.run().each(function(result) {
-                    // .run().each has a limit of 4,000 results
-              
-					l60locQty = result.getValue({
-                        name: "quantityavailable",
-                        join: "binOnHand",
-                        summary: "SUM"
-                    })
-
-                    return true;
-                });
-	
-              
-					record.submitFields({
-                        type: 'inventoryitem',
-                        id: internalId,
-                        values: {
-
-                            custitem_jy_avail_qty_l41: l41LocQty,
-                            custitem_jy_available_quantity_l60: l60locQty
-                        },
-                        options: {
-                            enableSourcing: false,
-                            ignoreMandatoryFields: true
-                        }
-                    });
-					
-					
-				//saved searches to update sold qty in last 7 days, 30 days & 6 Months & Life Time
-        
-
-            } catch (e) {
-                log.error('Error', e.message)
-            }
+        } catch (e) {
+            log.error('Error', e);
         }
-        return {
-            afterSubmit: afterSubmit
-        }
+    };
 
-    });
+    return { afterSubmit };
+
+});

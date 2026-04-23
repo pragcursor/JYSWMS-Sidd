@@ -387,7 +387,7 @@ define([
                 //     sendData(responseJson.data);
                 // }    function getDropShipOrders(context, pageSize, startIndex) {
 
-                const responseJson = autoLocUtil.getDropShipOrders(payload,1000,0);  //_helperfunction
+                const responseJson = autoLocUtil.getDropShipOrders(payload, 1000, 0);  //_helperfunction
                 log.error('DUP API RESPONSE for SOID: ' + soId, responseJson);
 
                 if (
@@ -513,25 +513,33 @@ define([
                     line: i
                 });
 
-                if (isClosed === true || isClosed === 'T' && !closed_sent) {
-                    if (pickedRaw > 0) {
-                        soRec.setSublistValue({
-                            sublistId: 'item',
-                            fieldId: 'custcol_jys_close_sent',
-                            line: i,
-                            value: true
-                        });
-                        soRec.setSublistValue({
-                            sublistId: 'item',
-                            fieldId: 'isclosed',
-                            line: i,
-                            value: true
-                        });
+                const lineUniqueKey = soRec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'lineuniquekey',
+                    line: i
+                });
+
+
+
+                if ((isClosed === true || isClosed === 'T') && !closed_sent) {
+
+                    const lineUniqueKey = soRec.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'lineuniquekey',
+                        line: i
+                    });
+
+                    if (lineUniqueKey) {
+                        log.error('CLOSED ITEM FOUND', String(lineUniqueKey));
+                        closedItemIds.add(String(lineUniqueKey));
                     }
 
-                    if (itemId && (pickedRaw == null || pickedRaw == '' || pickedRaw == undefined || pickedRaw == 0)) {
-                        closedItemIds.add(String(itemId));
-                    }
+                    soRec.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'custcol_jys_close_sent',
+                        line: i,
+                        value: true
+                    });
                 }
             }
 
@@ -541,27 +549,17 @@ define([
             if (closedItemIds.size > 0) {
 
                 const tranDate = soRec.getValue({ fieldId: 'trandate' });
-
-                if (!tranDate || new Date(tranDate) <= CLOSED_SYNC_START_DATE) {
-                    // log.debug('CLOSED SYNC SKIPPED - Old Order', {
-                    //     soId: soRec.id,
-                    //     trandate: tranDate
-                    // });
-
-                } else if (tranDate && new Date(tranDate) > CLOSED_SYNC_START_DATE) {
-                    //  log.error('CLOSED ITEMS FOUND for SOID: ' + soRec.id, Array.from(closedItemIds));
+            
+                if (tranDate && new Date(tranDate) > CLOSED_SYNC_START_DATE) {
+            
                     const payload = {
-                        salesOrderHeaderId: soRec.id,
-                        salesOrderItemId: Array.from(closedItemIds)
+                        salesOrderId: soRec.id,
+                        lineUniqueKey: Array.from(closedItemIds)
                     };
-
-                    //  log.error('CLOSED ITEMS DETECTED', payload);
-
-                    const responseJson = autoLocUtil.getDropShipOrders_helperfunction(payload);
-
-                    if (responseJson && responseJson.length > 0) {
-                        //  sendClosedData(responseJson);
-                    }
+            
+                    log.error('SENDING CLOSED DATA', payload);
+            
+                    sendClosedData(payload);
                 }
             }
 
@@ -742,7 +740,7 @@ define([
     // =========================================================
     // SEND CLOSED DATA
     // =========================================================
-    const sendClosedData = (payload) => {
+    function sendClosedData(payload) {
 
         const token = tokenModule.generateToken();
         if (!token) {
@@ -752,7 +750,7 @@ define([
 
         try {
             const response = https.post({
-                url: 'https://api.jyswms.com/update-dropship-lines?closed=true',
+                url: 'https://api.jyswms.com/close-order-line?unique_id=' + payload.lineUniqueKey,
                 headers: {
                     'Authorization': 'Bearer ' + token,
                     'Content-Type': 'application/json'

@@ -22,8 +22,12 @@ define(['N/record', 'N/log'], function (record, log) {
             }
 
             // Load Item Record
-            var itemRec = record.load({
-                type: record.Type.INVENTORY_ITEM, // change if needed
+            // var itemRec = record.load({
+            //     type: record.Type.INVENTORY_ITEM, // change if needed
+            //     id: itemId
+            // });
+             var itemRec = record.load({
+                type: 'customrecordhj_tc_package_contents', // change if needed
                 id: itemId
             });
 

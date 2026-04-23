@@ -1,5 +1,5 @@
 /**
- * @NApiVersion 2.x
+ * @NApiVersion 2.1
  * @NScriptType UserEventScript
  */
 
@@ -245,6 +245,19 @@ define([
                 fieldId: 'lineuniquekey',
                 line: i
             });
+            try {
+                if (rawKey) {
+                soRec.setSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'custcol_wms_unique_id',
+                    line: i,
+                    value: Number(rawKey)
+                });
+            }
+            } catch (error) {
+                log.error('Error setting custcol_wms_unique_id for line ' + i, error);
+            }
+            
 
             var key = normalizeKey(rawKey);
 
@@ -367,7 +380,79 @@ define([
         return errors.join(' | '); // or return errors[0] for first-only approach
     }
 
+    function beforeSubmit(context) {
+        try {
+
+            if (
+                context.type !== context.UserEventType.CREATE &&
+                context.type !== context.UserEventType.EDIT
+            ) return;
+
+            var rec = context.newRecord;
+
+            var jysenabled = rec.getValue({ fieldId: 'custbody_jys_enabled_customer' });
+            if (!jysenabled) return;
+
+            // ✅ USE orderstatus (internal)
+            var orderStatus = rec.getValue({ fieldId: 'orderstatus' });
+
+            // Allow only B, C, H
+            if (context.type === context.UserEventType.EDIT) {
+                if (!['B', 'C', 'H'].includes(orderStatus)) {
+                    return;
+                }
+            }
+
+            var lineCount = rec.getLineCount({ sublistId: 'item' });
+            var hasParts = false;
+
+            for (var i = 0; i < lineCount; i++) {
+
+                var itemId = rec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'item',
+                    line: i
+                });
+
+                var locationId = rec.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'location',
+                    line: i
+                });
+
+                // ✅ STRICT number compare
+                if (Number(itemId) === 57740 && Number(locationId) !== 9) {
+
+                    hasParts = true;
+
+                    rec.setSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'location',
+                        line: i,
+                        value: 9
+                    });
+                }
+            }
+
+            if (!hasParts) return;
+            log.error('for sales order id: ' + rec.id + ' hasParts: ' + hasParts);
+            // ✅ Header location
+            if (Number(rec.getValue('location')) !== 9) {
+                rec.setValue({
+                    fieldId: 'location',
+                    value: 9
+                });
+            }
+
+
+
+        } catch (e) {
+            log.error('ERROR', e);
+        }
+    }
+
     return {
-        afterSubmit: afterSubmit
+        afterSubmit: afterSubmit,
+        beforeSubmit: beforeSubmit
     };
 });

@@ -38,38 +38,50 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
                     itemMap[itemId] = true;
                     itemList.push(itemId);
                 }
-            }
 
+            }
             if (!itemList.length) return;
 
+
+
             // ===============================
-            // Bulk item search (YOUR WORKING MODEL)
+            // Bulk item search 
             // ===============================
             var itemDataMap = {};
 
             var itemSearch = search.create({
-                type: search.Type.INVENTORY_ITEM,
-                filters: [
-                    ['internalid', 'anyof', itemList],
-  
-                ],
-                columns: [
-                    'internalid',
-                    'mpn',
-                  'othervendor',
-                    'vendorcode'
-                ]
-            });
+                type: "inventoryitem",
+                filters:
+                    [
+                        ["type", "anyof", "InvtPart"],
+                        "AND",
+                        ["internalid", "anyof", itemList],
+                        "AND",
+                        ["othervendor", "anyof", poVendor]
+                    ],
+                columns:
+                    [
+                        search.createColumn({ name: "itemid", label: "Name" }),
+                        search.createColumn({ name: "internalid", label: "internalid" }),
 
+                        search.createColumn({ name: "mpn", label: "MPN" }),
+                        search.createColumn({ name: "othervendor", label: "Vendor" }),
+                        search.createColumn({ name: "vendorcode", label: "Vendor Code" })
+                    ]
+            });
+           // log.error('itemSearch', itemSearch)
             itemSearch.run().each(function (result) {
 
                 var itemId = result.getValue('internalid');
+                //  log.error('itemId',itemId)
                 var mpn = result.getValue('mpn') || '';
-                var vendorCode = result.getValue('vendorcode') || '';
-              var othervendor=result.getValue('othervendor') || '';
 
-              if(othervendor!=poVendor)
-                vendorCode='';
+                var vendorCode = result.getValue('vendorcode') || '';
+                var othervendor = result.getValue('othervendor') || '';
+
+                if (othervendor != poVendor)
+                    vendorCode = '';
+
                 itemDataMap[itemId] = {
                     mpn: mpn,
                     vendorCode: vendorCode
@@ -92,6 +104,7 @@ define(['N/record', 'N/search', 'N/log'], function (record, search, log) {
                 });
 
                 var itemInfo = itemDataMap[lineItemId];
+                log.error('itemInfo', itemInfo)
                 if (!itemInfo) continue;
 
                 var valueToSet = '';
