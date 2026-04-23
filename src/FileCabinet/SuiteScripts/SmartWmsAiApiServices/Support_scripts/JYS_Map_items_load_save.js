@@ -6,11 +6,6 @@
 define(['N/search', 'N/record', 'N/log', 'N/runtime'],
     (search, record, log, runtime) => {
 
-        /**
-         * GET INPUT DATA
-         * Runs once. Returns up to 16,000 items via paged search.
-         * Time estimate: ~10–30 seconds
-         */
         const getInputData = () => {
             return search.create({
                 type: search.Type.INVENTORY_ITEM,
@@ -19,69 +14,57 @@ define(['N/search', 'N/record', 'N/log', 'N/runtime'],
                     'AND',
                     ['isinactive', 'is', 'F'],
                     'AND',
-                    ['modified', 'within', 'previousoneweek']
+                    ["modified", "within", "previousoneday"]
                 ],
                 columns: [
                     search.createColumn({ name: 'internalid' })
                 ]
             });
-            // Returning the search object directly lets the M/R framework
-            // handle pagination — no 4,000-row .run().each() limit here.
         };
 
-        /**
-         * MAP
-         * Called once per search result row.
-         * Key = internalId, value = internalId (we only need the ID to load the record).
-         * NetSuite runs map stages in parallel across multiple queues.
-         * Time estimate: ~5–15 minutes for 16,000 items
-         */
         const map = (context) => {
             const result = JSON.parse(context.value);
-            const internalId = result.id; // M/R passes the record's internal ID as result.id
+            const internalId = result.id;
 
-            log.debug('MAP', `Processing internalId: ${internalId}`);
+            if (!internalId) return; // skip bad rows silently
+
             context.write({
                 key: internalId,
                 value: internalId
             });
         };
 
-        /**
-         * REDUCE
-         * Called once per unique key (= once per item).
-         * Loads the full record and saves it — this triggers all beforeLoad /
-         * beforeSubmit / afterSubmit user events you have on Inventory Item.
-         * Time estimate: ~40–90 minutes for 16,000 items
-         *   (each load+save ~200–400 ms on average, 4 queues × parallel)
-         */
         const reduce = (context) => {
             const internalId = context.key;
 
             try {
-                // Governance check — each load+save costs ~20 units; limit is 10,000/queue
-                const remainingUnits = runtime.getCurrentScript().getRemainingUsage();
-                log.debug('GOVERNANCE', `Remaining units before processing ${internalId}: ${remainingUnits}`);
+                // ── Governance guard ──────────────────────────────────────
+                // load + save costs ~20 units; guard at 50 to stay safe
+                const remaining = runtime.getCurrentScript().getRemainingUsage();
+                if (remaining < 50) {
+                    log.error('GOVERNANCE SKIP',
+                        `Item ${internalId} skipped — only ${remaining} units remaining`);
+                    context.write({
+                        key: internalId,
+                        value: JSON.stringify({ success: false, error: 'governance_skip' })
+                    });
+                    return;
+                }
 
-                // Load record — triggers beforeLoad user event
+                // ── Load ──────────────────────────────────────────────────
                 const itemRecord = record.load({
                     type: record.Type.INVENTORY_ITEM,
                     id: internalId,
-                    isDynamic: false   // Use standard mode for M/R (more stable, lower governance)
+                    isDynamic: false  // standard mode — faster, lower governance
                 });
 
-                // Optional: make a field touch so user events fire even with no changes
-                // Some UEs check for actual field changes — touch 'lastmodifieddate' equivalent
-                // by setting a harmless field. Skip if your UE fires unconditionally.
-                // itemRecord.setValue({ fieldId: 'custitem_mr_trigger', value: true });
-
-                // Save record — triggers beforeSubmit + afterSubmit user events
                 const savedId = itemRecord.save({
-                    enableSourcing: true,
-                    ignoreMandatoryFields: false
+                    enableSourcing: false,
+                    ignoreMandatoryFields: true
                 });
 
-                log.audit('REDUCE SUCCESS', `Saved item ${savedId}`);
+                log.audit('REDUCE SUCCESS',
+                    `Saved item ${savedId} | Remaining Usage: ${runtime.getCurrentScript().getRemainingUsage()}`);
 
                 context.write({
                     key: internalId,
@@ -90,7 +73,6 @@ define(['N/search', 'N/record', 'N/log', 'N/runtime'],
 
             } catch (e) {
                 log.error('REDUCE ERROR', `Item ${internalId} | ${e.message}`);
-
                 context.write({
                     key: internalId,
                     value: JSON.stringify({ success: false, error: e.message })
@@ -98,14 +80,31 @@ define(['N/search', 'N/record', 'N/log', 'N/runtime'],
             }
         };
 
-        /**
-         * SUMMARIZE
-         * Runs once after all reduce stages finish.
-         * Logs success / failure counts.
-         * Time estimate: < 1 minute
-         */
         const summarize = (summary) => {
-          log.audit('SUMMARIZE', `Total keys processed: ${summary.output.length}`);
+            let success = 0;
+            let failed = 0;
+            const errors = [];
+
+            // ✅ Fixed: summary.output.length is unreliable — use iterator
+            summary.output.iterator().each((key, value) => {
+                const result = JSON.parse(value);
+                result.success ? success++ : failed++;
+                if (!result.success) errors.push(`Item ${key}: ${result.error}`);
+                return true;
+            });
+
+            // Log any framework-level errors (timeouts, reschedules)
+            summary.reduceSummary.errors.iterator().each((key, error) => {
+                log.error('FRAMEWORK ERROR', `Key: ${key} | ${JSON.stringify(error)}`);
+                return true;
+            });
+
+            log.audit('SUMMARIZE',
+                `✅ Success: ${success} | ❌ Failed: ${failed} | Duration: ${summary.seconds}s`);
+
+            if (errors.length > 0) {
+                log.error('FAILED ITEMS', JSON.stringify(errors));
+            }
         };
 
         return { getInputData, map, reduce, summarize };

@@ -474,7 +474,7 @@ define(['N/record', 'N/search', 'N/format', 'N/log', 'N/runtime'],
                 }
             });
 
-            log.audit('processItem OK', 'Item ' + internalId + ' | Gov remaining: ' + runtime.getCurrentScript().getRemainingUsage());
+           // log.audit('processItem OK', 'Item ' + internalId + ' | Gov remaining: ' + runtime.getCurrentScript().getRemainingUsage());
 
         } catch (e) {
             log.error('processItem FAILED', 'Item ' + internalId + ' | ' + e.message);
