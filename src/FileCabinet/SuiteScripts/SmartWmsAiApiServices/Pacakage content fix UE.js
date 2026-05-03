@@ -1,10 +1,29 @@
 /**
- *@NApiVersion 2.1
- *@NScriptType UserEventScript
+ * @NApiVersion 2.1
+ * @NScriptType UserEventScript
+ *
+ * FIX SUMMARY:
+ * 1. custrecordhj_pkg_desc stores "itemInternalId/qty" (e.g. "12345/1") — NOT an item name.
+ *    Old code tried to strip "(qty)" and do a name-based search → always returned null.
+ *    Fix: Parse the internal ID directly from the slash-delimited string,
+ *         AND also read custrecord_jyswms_item_id as a fallback (set by orderUtils.js).
+ *
+ * 2. shouldPopulate was read from the re-loaded record (pkgRec), which may already
+ *    have been reset to false by the time afterSubmit fires.
+ *    Fix: Read it from context.newRecord first (snapshot at save time), fall back
+ *    to the loaded record only if context.newRecord returns null/undefined.
+ *
+ * 3. getItemDetails used 'itemweight' field on the IF sublist — this is unreliable.
+ *    Fix: Added 'custcol_item_weight' as a secondary fallback, and default to 0.
+ *
+ * 4. qty-fix loop ran even when shouldPopulate=true (just added a line), causing
+ *    the new line's qty to be overwritten before totalWeight was calculated.
+ *    Fix: Only run the qty-fix block when shouldPopulate is false (already the intent,
+ *    but now guarded properly after the line-add block completes).
  */
-define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
+define(['N/record', 'N/log', 'N/search'], (record, log, search) => {
 
-    function afterSubmit(context) {
+    const afterSubmit = (context) => {
 
         if (context.type !== context.UserEventType.CREATE &&
             context.type !== context.UserEventType.EDIT) {
@@ -12,177 +31,330 @@ define(['N/record', 'N/log', 'N/search'], function (record, log, search) {
         }
 
         try {
-            var recId = context.newRecord.id;
-            var swms = context.newRecord.getValue({
-                fieldId: 'custrecord_jyswms_createdfrom'
-            });
+            const recId = context.newRecord.id;
 
-            var issue = context.newRecord.getValue({
+            // ─── FIX #2: Read flag from context.newRecord (snapshot at save time) ──────
+            // context.newRecord reflects the values the user actually submitted.
+            // Loading the record again risks reading a value already reset by another
+            // script or by the save pipeline itself.
+            let shouldPopulate = context.newRecord.getValue({
                 fieldId: 'custrecord_jyswms_item_not_populated'
             });
-            // if (!swms) {
-            //     log.debug('Exit', 'Not created from SWMS');
-            //     return;
-            // }
-            if(!issue) {
-                log.debug('Exit', 'Item already populated');
-                return;
-            }
-            var pkgRec = record.load({
+
+            log.debug('shouldPopulate (from context.newRecord)', shouldPopulate);
+
+            // Load the record for mutation (we need isDynamic to edit sublists)
+            const pkgRec = record.load({
                 type: 'customrecordhj_tc_package_contents',
                 id: recId,
                 isDynamic: true
             });
 
-
-
-            var tranId = pkgRec.getValue({
-                fieldId: 'custrecord_hj_packagecontents_sublist'
-            });
-
-            if (!tranId) {
-                log.debug('Exit', 'No fulfillment linked');
-                return;
+            // Fallback: if context gave us null/undefined, read from the loaded record
+            if (shouldPopulate === null || shouldPopulate === undefined) {
+                shouldPopulate = pkgRec.getValue({
+                    fieldId: 'custrecord_jyswms_item_not_populated'
+                });
+                log.debug('shouldPopulate (fallback from pkgRec)', shouldPopulate);
             }
 
-            var itemName = pkgRec.getValue({
-                fieldId: 'custrecordhj_pkg_desc'
-            });
+            const sublistId = 'recmachcustrecordhj_tc_pkgcont_lineitemparent';
 
-            if (!itemName) return;
+            // =====================================================
+            // STEP 1: ADD LINE ONLY IF FLAG = TRUE
+            // =====================================================
 
-            itemName = itemName.replace(/\/.*$/, '').trim();
-            var itemId = getItemId(itemName);
+            if (shouldPopulate) {
 
-            //log.debug('itemId', itemId);
-          
-            if (!itemId) return;
+                const tranId = pkgRec.getValue({
+                    fieldId: 'custrecord_hj_packagecontents_sublist'
+                });
 
-            var sublistId = 'recmachcustrecordhj_tc_pkgcont_lineitemparent';
+                log.debug('tranId', tranId);
 
-            /** ---------- DUPLICATE PREVENTION ---------- */
-            var existingLineCount = pkgRec.getLineCount({ sublistId: sublistId });
+                // ─── FIX #1: Read item ID — two sources ───────────────────────────────
+                //
+                // Source A (preferred): custrecord_jyswms_item_id
+                //   orderUtils.js sets this directly to the item's internal ID.
+                //
+                // Source B (fallback): custrecordhj_pkg_desc
+                //   orderUtils.js stores this as  itemInternalId + "/1"  e.g. "12345/1"
+                //   The old code stripped "(qty)" and searched by name — WRONG.
+                //   Correct parse: split on "/" and take the first segment.
+                //
+                let itemId = pkgRec.getValue({ fieldId: 'custrecord_jyswms_item_id' });
 
-            for (var i = 0; i < existingLineCount; i++) {
-                var existingItem = pkgRec.getSublistValue({
-                    sublistId: sublistId,
+                if (!itemId) {
+                    const pkgDescRaw = pkgRec.getValue({ fieldId: 'custrecordhj_pkg_desc' });
+                    log.debug('pkgDescRaw (for fallback parse)', pkgDescRaw);
+
+                    if (pkgDescRaw) {
+                        // Format written by orderUtils.js:  "<itemInternalId>/1"
+                        // e.g. "12345/1"  →  itemId = "12345"
+                        const parts = String(pkgDescRaw).split('/');
+                        const candidate = parts[0].trim();
+
+                        // Validate it is numeric (internal IDs always are)
+                        if (/^\d+$/.test(candidate)) {
+                            itemId = candidate;
+                            log.debug('itemId parsed from custrecordhj_pkg_desc', itemId);
+                        } else {
+                            // The field might still contain an old-style item name — do a
+                            // name-based lookup as a last resort.
+                            log.debug('pkgDesc candidate is not numeric, trying name lookup', candidate);
+                            itemId = getItemIdByName(candidate);
+                            log.debug('itemId from name lookup', itemId);
+                        }
+                    }
+                } else {
+                    log.debug('itemId from custrecord_jyswms_item_id', itemId);
+                }
+
+                if (!tranId || !itemId) {
+                    log.error('Cannot add line', 'tranId: ' + tranId + ' | itemId: ' + itemId);
+                } else {
+
+                    // Check if the item already exists in the sublist
+                    const lineCount = pkgRec.getLineCount({ sublistId });
+                    let exists = false;
+
+                    for (let i = 0; i < lineCount; i++) {
+                        const existingItem = pkgRec.getSublistValue({
+                            sublistId,
+                            fieldId: 'custrecordhj_tc_pkgcontents_lineitemitem',
+                            line: i
+                        });
+
+                        if (String(existingItem) === String(itemId)) {
+                            exists = true;
+                            break;
+                        }
+                    }
+
+                    if (!exists) {
+
+                        const itemDetails = getItemDetails(tranId, itemId);
+                       // log.debug('itemDetails from IF', JSON.stringify(itemDetails));
+
+                        if (itemDetails && itemDetails.length > 0) {
+
+                            const item = itemDetails[0];
+
+                            pkgRec.selectNewLine({ sublistId });
+
+                            pkgRec.setCurrentSublistValue({
+                                sublistId,
+                                fieldId: 'custrecordhj_tc_pkgcontents_lineitemitem',
+                                value: itemId
+                            });
+
+                            pkgRec.setCurrentSublistValue({
+                                sublistId,
+                                fieldId: 'custrecordhj_tc_pkgcontents_lineitemqty',
+                                value: 1
+                            });
+
+                            pkgRec.setCurrentSublistValue({
+                                sublistId,
+                                fieldId: 'custrecordhj_tc_pkgcontentslineitemdesc',
+                                value: item.description || ''
+                            });
+                            if (item.weight) {
+                                pkgRec.setCurrentSublistValue({
+                                    sublistId,
+                                    fieldId: 'custrecordhj_tc_pkgcontents_lineitemwt',
+                                    value: parseFloat(item.weight)
+                                });
+                            }
+                            pkgRec.commitLine({ sublistId });
+
+                            log.debug('Line Added', 'itemId: ' + itemId);
+
+                        } else {
+                            // Item not found on the fulfillment — log clearly and still mark flag false
+                            log.error('getItemDetails returned empty', 'tranId: ' + tranId + ' | itemId: ' + itemId);
+                        }
+
+                    } else {
+                        log.debug('Line already exists', 'itemId: ' + itemId + ' already in sublist');
+                    }
+
+                    // Always mark the flag false — whether we added the line or it already existed
+                    pkgRec.setValue({
+                        fieldId: 'custrecord_jyswms_item_not_populated',
+                        value: false
+                    });
+                }
+
+            } // end if (shouldPopulate)
+
+            // =====================================================
+            // STEP 2: ALWAYS CALCULATE HEADER WEIGHT
+            // =====================================================
+
+            const updatedLineCount = pkgRec.getLineCount({ sublistId });
+            let totalWeight = 0;
+
+            for (let i = 0; i < updatedLineCount; i++) {
+
+                let qty = parseFloat(pkgRec.getSublistValue({
+                    sublistId,
+                    fieldId: 'custrecordhj_tc_pkgcontents_lineitemqty',
+                    line: i
+                })) || 0;
+
+                var weight = parseFloat(pkgRec.getSublistValue({
+                    sublistId,
+                    fieldId: 'custrecordhj_tc_pkgcontents_lineitemwt',
+                    line: i
+                })) || 0;
+
+                const itemCode = pkgRec.getSublistValue({
+                    sublistId,
                     fieldId: 'custrecordhj_tc_pkgcontents_lineitemitem',
                     line: i
                 });
+               // log.debug('itemCode', itemCode);
 
-                if (existingItem == itemId) {
-                    log.debug('Exit', 'Item already exists on sublist');
-                    return; // HARD STOP
+                if (itemCode == '57740') {
+                    log.debug('Weight Override', 'Line ' + i + ' has item code "PARTS" → overriding weight to 1');
+                    weight = 1;
                 }
+                // ─── FIX #4: Only run qty-fix for EDIT flows (not shouldPopulate=true) ─
+                // When shouldPopulate=true we just added the line with the correct qty.
+                // The fix below is for lines that already existed with qty=0.
+                if (!shouldPopulate) {
+                    if (!qty || qty === 0) {
+
+                        pkgRec.selectLine({ sublistId, line: i });
+
+                        pkgRec.setCurrentSublistValue({
+                            sublistId,
+                            fieldId: 'custrecordhj_tc_pkgcontents_lineitemqty',
+                            value: 1
+                        });
+
+                        pkgRec.setCurrentSublistValue({
+                            sublistId,
+                            fieldId: 'custrecordhj_tc_pkgcontents_lineitemqtyd',
+                            value: 1
+                        });
+
+                        pkgRec.commitLine({ sublistId });
+
+                        qty = 1;
+                        log.debug('Qty Fixed', 'Line ' + i + ' was 0 → set to 1');
+                    }
+                }
+
+                log.debug('Line ' + i, 'Qty: ' + qty + ' | Weight: ' + weight);
+                totalWeight += (qty * weight);
             }
 
-            if (existingLineCount > 0) {
+            pkgRec.setValue({
+                fieldId: 'custrecordhj_tc_packagecontentslbs',
+                value: totalWeight
+            });
 
-                pkgRec.setValue({
-                    fieldId: 'custrecord_jyswms_item_not_populated',
-                    value: false
-                });
-            }
-            /** ------------------------------------------ */
+            // =====================================================
+            // STEP 3: SAVE
+            // =====================================================
 
-            var itemDetails = getItemDetails(tranId, itemId);
-           log.debug('itemDetails', itemDetails);
-            if (!itemDetails || !itemDetails.length) return;
-            var updated = false;
-            // FORCE SINGLE LINE
-            var item = itemDetails[0];
-            if (existingLineCount <= 0) {
-                pkgRec.selectNewLine({ sublistId: sublistId });
-                pkgRec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_tc_pkgcontents_lineitemitem',
-                    value: itemId             //item.itemId
-                });
-                pkgRec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_tc_pkgcontents_lineitemqty',
-                    value: 1
-                });
-                pkgRec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_tc_pkgcontentslineitemdesc',
-                    value: item.description
-                });
-                pkgRec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_tc_pkgcontents_lineitemwt',
-                    value: item.weight
-                });
-                pkgRec.commitLine({ sublistId: sublistId });
-                updated = true;
-            }
-            if(updated) {
-                pkgRec.setValue({
-                    fieldId: 'custrecord_jyswms_item_not_populated',
-                    value: false
-                });
-            }
-            // pkgRec.setValue({
-            //     fieldId: 'custrecord_jyswms_item_not_populated',
-            //     value: true
-            // });
             pkgRec.save({
                 enableSourcing: false,
                 ignoreMandatoryFields: true
             });
 
-            log.debug('Success', 'Single line added to package contents' + recId);
+            log.audit('Done', 'Package ' + recId + ' | Total Weight: ' + totalWeight);
 
         } catch (e) {
-            log.error('afterSubmit Error', e);
+            log.error('afterSubmit Error', e.message + ' | ' + JSON.stringify(e));
         }
-    }
+    };
 
-    function getItemDetails(tranId, itemId) {
-        var details = [];
+    // ================= HELPERS =================
 
-        var fulfill = record.load({
-            type: record.Type.ITEM_FULFILLMENT,
-            id: tranId
-        });
+    /**
+     * Load the Item Fulfillment and find all lines matching itemId.
+     * FIX #3: Weight fallback chain — 'itemweight' → 'custcol_item_weight' → 0
+     */
+    const getItemDetails = (tranId, itemId) => {
 
-        var count = fulfill.getLineCount({ sublistId: 'item' });
+        const details = [];
 
-        for (var i = 0; i < count; i++) {
-            var lineItem = fulfill.getSublistValue({
-                sublistId: 'item',
-                fieldId: 'item',
-                line: i
+        try {
+            const fulfill = record.load({
+                type: record.Type.ITEM_FULFILLMENT,
+                id: tranId
             });
-            // log.debug('lineItem', lineItem);
-            if (lineItem == itemId) {
-                details.push({
-                    itemId: lineItem,
-                    quantity: fulfill.getSublistValue({ sublistId: 'item', fieldId: 'quantity', line: i }),
-                    description: fulfill.getSublistValue({ sublistId: 'item', fieldId: 'description', line: i }),
-                    weight: fulfill.getSublistValue({ sublistId: 'item', fieldId: 'itemweight', line: i })
+
+            const count = fulfill.getLineCount({ sublistId: 'item' });
+
+            for (let i = 0; i < count; i++) {
+
+                const lineItem = fulfill.getSublistValue({
+                    sublistId: 'item',
+                    fieldId: 'item',
+                    line: i
                 });
+
+                if (String(lineItem) === String(itemId)) {
+
+                    // Weight: try standard field first, then custom column, then 0
+                    let weight = parseFloat(fulfill.getSublistValue({
+                        sublistId: 'item',
+                        fieldId: 'itemweight',
+                        line: i
+                    }));
+
+                    if (!weight) {
+                        weight = parseFloat(fulfill.getSublistValue({
+                            sublistId: 'item',
+                            fieldId: 'custcol_item_weight',
+                            line: i
+                        }));
+                    }
+
+                    details.push({
+                        itemId: lineItem,
+                        quantity: fulfill.getSublistValue({ sublistId: 'item', fieldId: 'quantity', line: i }),
+                        description: fulfill.getSublistValue({ sublistId: 'item', fieldId: 'description', line: i }),
+                        weight: weight
+                    });
+                }
             }
+        } catch (e) {
+            log.error('getItemDetails Error', 'tranId: ' + tranId + ' | ' + e.message);
         }
+
         return details;
-    }
+    };
 
-    function getItemId(itemName) {
-        var itemId = null;
+    /**
+     * Last-resort: look up item internal ID by display name.
+     * Only reached when custrecordhj_pkg_desc is in old name format (not "id/qty").
+     */
+    const getItemIdByName = (itemName) => {
 
-        search.create({
-            type: search.Type.ITEM,
-            filters: [['name', 'is', itemName]],
-            columns: ['internalid']
-        }).run().each(function (res) {
-            itemId = res.getValue('internalid');
-            return false;
-        });
+        if (!itemName) return null;
+
+        let itemId = null;
+
+        try {
+            search.create({
+                type: search.Type.ITEM,
+                filters: [['name', 'is', itemName]],
+                columns: ['internalid']
+            }).run().each((res) => {
+                itemId = res.getValue('internalid');
+                return false;
+            });
+        } catch (e) {
+            log.error('getItemIdByName Error', e.message);
+        }
 
         return itemId;
-    }
-
-    return {
-        afterSubmit: afterSubmit
     };
+
+    return { afterSubmit };
 });

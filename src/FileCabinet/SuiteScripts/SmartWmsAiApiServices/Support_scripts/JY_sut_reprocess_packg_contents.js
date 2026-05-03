@@ -1,8 +1,18 @@
 /**
-
-* @NApiVersion 2.1
-* @NScriptType Suitelet
-  */
+ * @NApiVersion 2.1
+ * @NScriptType Suitelet
+ *
+ * OPTIMIZATIONS:
+ *  1. Item name → ID resolved once via a single multi-filter search (batch)
+ *  2. Item weights fetched in one search.lookupFields pass per unique item
+ *  3. Package-content rows written with a non-dynamic record load (faster commits)
+ *  4. Governance guard: checks remaining units before heavy loops and logs warnings
+ *
+ * BUG FIXES:
+ *  1. Package contents now deleted before recreating — prevents stacking on reprocess
+ *  2. One content record created per tracking number (not qty × tracking count)
+ *  3. Removed flawed diff logic (existingMap key mismatch caused records to never be skipped)
+ */
 
 define([
     'N/ui/serverWidget',
@@ -10,57 +20,60 @@ define([
     'N/search',
     'N/https',
     'N/log',
-    '../JYSWMS_generateToken_API.js'
-], function (ui, record, search, https, log, tokenModule) {
+    'N/runtime',
+    '../JYSWMS_generateToken_API'
+], function (ui, record, search, https, log, runtime, tokenModule) {
 
+    /* ─── governance threshold ───────────────────────────────────────────── */
+    var GOVERNANCE_WARN_THRESHOLD = 200;
 
+    /* ═══════════════════════════════════════════════════════════════════════
+       ENTRY POINT
+    ═══════════════════════════════════════════════════════════════════════ */
     function onRequest(context) {
 
-        var form = ui.createForm({
-            title: 'Reprocess Fulfillment Packages'
-        });
+        var form = ui.createForm({ title: 'Reprocess Fulfillment Packages' });
 
         try {
 
             var fulfillmentId = context.request.parameters.ifid;
             if (!fulfillmentId) throw 'Missing fulfillmentId';
 
+            checkGovernance('start');
+
             var fulfillment = record.load({
-                type: record.Type.ITEM_FULFILLMENT,
-                id: fulfillmentId,
+                type:      record.Type.ITEM_FULFILLMENT,
+                id:        fulfillmentId,
                 isDynamic: true
             });
 
             var soId = fulfillment.getValue({ fieldId: 'createdfrom' });
             if (!soId) throw 'Missing Sales Order';
 
-            /* ======================
-               FETCH WMS DATA
-            ====================== */
-
+            /* ── FETCH WMS DATA ──────────────────────────────────────────── */
             var wmsLines = callWmsApi(soId);
+            if (!wmsLines.length) throw 'No WMS data found';
 
-            if (!wmsLines.length) {
-                throw 'No WMS data found';
-            }
+            /* ── PRE-CACHE item IDs and weights in bulk ──────────────────── */
+            var itemNames   = collectUniqueItemNames(wmsLines);
+            var itemIdCache = batchGetItemIds(itemNames);
+            var weightCache = batchGetItemWeights(itemIdCache);
 
-            /* ======================
-               BUILD PACKAGE LINES
-            ====================== */
+            checkGovernance('after-cache');
 
+            /* ── BUILD PACKAGE LINES ─────────────────────────────────────── */
             clearPackages(fulfillment);
-            createPackageLines(fulfillment, wmsLines);
+            createPackageLines(fulfillment, wmsLines, weightCache);
 
             var savedId = fulfillment.save({
-                enableSourcing: true,
+                enableSourcing:        true,
                 ignoreMandatoryFields: true
             });
 
-            /* ======================
-               PACKAGE CONTENTS
-            ====================== */
+            checkGovernance('after-package-lines-save');
 
-            createPackageContentsSmart(savedId, wmsLines);
+            /* ── PACKAGE CONTENTS ────────────────────────────────────────── */
+            createPackageContentsSmart(savedId, wmsLines, weightCache);
 
             renderSuccess(form, savedId);
 
@@ -68,68 +81,137 @@ define([
 
             log.error('ERROR', e);
             renderError(form, e);
-
         }
 
         context.response.writePage(form);
     }
 
-    /* ======================
+    /* ═══════════════════════════════════════════════════════════════════════
        CALL WMS
-    ====================== */
-
+    ═══════════════════════════════════════════════════════════════════════ */
     function callWmsApi(soId) {
 
         var token = tokenModule.generateToken();
 
         var response = https.get({
-            url: 'https://api.jyswms.com/dropship-sales-order-status?sales_order_id=' + soId,
+            url: 'https://api.jyswms.com/dropship-sales-order-status-with-bins?sales_order_id=' + soId,
             headers: {
-                'Authorization': 'Bearer ' + token
+                'Authorization': 'Bearer ' + token,
+                'Content-Type':  'application/json'
             }
         });
 
-        if (response.code !== 200) {
-            throw 'WMS API failed: ' + response.code;
-        }
+        if (response.code !== 200) throw 'WMS API failed: ' + response.code;
 
         var body = JSON.parse(response.body || '{}');
 
-        var source = body.completed?.length
-            ? body.completed
-            : body.notcompleted;
+        var source = (body.completed    && body.completed.length)    ? body.completed    :
+                     (body.notcompleted && body.notcompleted.length)  ? body.notcompleted : [];
 
-        return source[0]?.data || [];
+        if (!source.length || !source[0]) throw 'No WMS order data found for SO: ' + soId;
+
+        return source[0].data || [];
     }
 
-    /* ======================
+    /* ═══════════════════════════════════════════════════════════════════════
+       NORMALIZE KEY
+    ═══════════════════════════════════════════════════════════════════════ */
+    function normalizeKey(val) {
+        if (!val) return '';
+        return String(val).split(/[-_]/)[0];
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       COLLECT UNIQUE ITEM NAMES
+    ═══════════════════════════════════════════════════════════════════════ */
+    function collectUniqueItemNames(wmsLines) {
+        var seen = {};
+        wmsLines.forEach(function (line) {
+            if (line.item && line.is_picked === 'picked') seen[line.item] = true;
+        });
+        return Object.keys(seen);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       BATCH GET ITEM IDs — single search for all items
+    ═══════════════════════════════════════════════════════════════════════ */
+    function batchGetItemIds(itemNames) {
+
+        var cache = {};
+        if (!itemNames.length) return cache;
+
+        var filters = [];
+        itemNames.forEach(function (name, idx) {
+            if (idx > 0) filters.push('OR');
+            filters.push(['itemid', 'is', name]);
+        });
+
+        search.create({
+            type:    'item',
+            filters: filters,
+            columns: [
+                search.createColumn({ name: 'internalid' }),
+                search.createColumn({ name: 'itemid'     })
+            ]
+        }).run().each(function (result) {
+            var name = result.getValue({ name: 'itemid'     });
+            var id   = result.getValue({ name: 'internalid' });
+            if (name && id) cache[name] = id;
+            return true;
+        });
+
+        log.audit('BATCH_ITEM_IDS', 'Resolved ' + Object.keys(cache).length + ' of ' + itemNames.length);
+        return cache;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       BATCH GET ITEM WEIGHTS — one lookup per unique item
+    ═══════════════════════════════════════════════════════════════════════ */
+    function batchGetItemWeights(itemIdCache) {
+
+        var weightCache = {};
+
+        Object.keys(itemIdCache).forEach(function (itemName) {
+            var itemId = itemIdCache[itemName];
+            try {
+                var fields = search.lookupFields({
+                    type:    search.Type.INVENTORY_ITEM,
+                    id:      itemId,
+                    columns: ['weight']
+                });
+                weightCache[itemName] = Number(fields.weight) || 1;
+            } catch (e) {
+                weightCache[itemName] = 1;
+            }
+        });
+
+        return weightCache;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════
        CLEAR PACKAGE LINES
-    ====================== */
-
+    ═══════════════════════════════════════════════════════════════════════ */
     function clearPackages(fulfillment) {
-
         var count = fulfillment.getLineCount({ sublistId: 'package' });
-
         for (var i = count - 1; i >= 0; i--) {
-            fulfillment.removeLine({
-                sublistId: 'package',
-                line: i,
-                ignoreRecalc: true
-            });
+            fulfillment.removeLine({ sublistId: 'package', line: i, ignoreRecalc: true });
         }
     }
 
-    /* ======================
-       CREATE PACKAGE LINES
-    ====================== */
-
-    function createPackageLines(fulfillment, wmsLines) {
+    /* ═══════════════════════════════════════════════════════════════════════
+       CREATE PACKAGE LINES — uses weight cache, no per-line searches
+    ═══════════════════════════════════════════════════════════════════════ */
+    function createPackageLines(fulfillment, wmsLines, weightCache) {
 
         var seen = {};
 
         wmsLines.forEach(function (line) {
 
             if (!line.item || line.is_picked !== 'picked') return;
+            var qty = Number(line.quantity) || 0;
+            if (!qty) return;
+
+            var weight = weightCache[line.item] || 1;
 
             (line.tracking_data || []).forEach(function (track) {
 
@@ -140,261 +222,157 @@ define([
 
                 fulfillment.setCurrentSublistValue({
                     sublistId: 'package',
-                    fieldId: 'packagetrackingnumber',
-                    value: tracking
+                    fieldId:   'packagetrackingnumber',
+                    value:     tracking
                 });
                 fulfillment.setCurrentSublistValue({
                     sublistId: 'package',
-                    fieldId: 'packageweight',
-                    value: getItemWeight(getItemIdByName(line.item))
+                    fieldId:   'packageweight',
+                    value:     weight
                 });
 
                 fulfillment.commitLine({ sublistId: 'package' });
-
                 seen[tracking] = true;
             });
-
         });
     }
 
-    /* ======================
-       EXISTING PACKAGE COUNTS (SEARCH)
-    ====================== */
+    /* ═══════════════════════════════════════════════════════════════════════
+       CREATE PACKAGE CONTENTS (SMART)
 
-    function getExistingPackageCounts(fulfillmentId) {
+       FIX 1: Deletes ALL existing package content records for this fulfillment
+              before creating new ones — prevents stacking on reprocess.
+       FIX 2: Creates exactly 1 content record per tracking number.
+              (old logic did qty × tracking count = thousands of records)
+    ═══════════════════════════════════════════════════════════════════════ */
+    function createPackageContentsSmart(fulfillmentId, wmsLines, weightCache) {
 
-        var map = {};
+        /* ── STEP 1: DELETE existing package content records ── */
+        var toDelete = [];
 
-        var s = search.create({
-            type: 'customrecordhj_tc_package_contents',
-            filters: [
-                ['custrecord_hj_packagecontents_sublist', 'anyof', fulfillmentId]
-            ],
-            columns: [
-                'custrecordhj_pkg_trackingnumber',
-                'custrecordhj_pkg_desc'
-            ]
-        });
-
-        s.run().each(function (r) {
-
-            var tracking = r.getValue('custrecordhj_pkg_trackingnumber') || '';
-            var desc = r.getValue('custrecordhj_pkg_desc') || '';
-
-            var itemName = desc.split('/')[0];
-
-            var key = tracking + '|' + itemName;
-
-            if (!map[key]) map[key] = 0;
-
-            map[key]++;
-
+        search.create({
+            type:    'customrecordhj_tc_package_contents',
+            filters: [['custrecord_hj_packagecontents_sublist', 'anyof', fulfillmentId]],
+            columns: ['internalid']
+        }).run().each(function (r) {
+            toDelete.push(r.getValue('internalid'));
             return true;
         });
 
-        return map;
-    }
+        toDelete.forEach(function (id) {
+            try {
+                record.delete({
+                    type: 'customrecordhj_tc_package_contents',
+                    id:   id
+                });
+            } catch (e) {
+                log.error('DELETE_FAILED', 'Could not delete record ' + id + ': ' + e);
+            }
+        });
 
-    /* ======================
-       REQUIRED COUNTS FROM WMS
-    ====================== */
+        log.audit('PACKAGE_CONTENTS_DELETED', toDelete.length + ' existing records removed');
 
-    function buildRequiredCounts(wmsLines) {
+        checkGovernance('after-delete');
 
-        var required = {};
+        /* ── STEP 2: Load fulfillment non-dynamically (faster bulk writes) ── */
+        var rec = record.load({
+            type:      record.Type.ITEM_FULFILLMENT,
+            id:        fulfillmentId,
+            isDynamic: false
+        });
 
+        var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
+        var lineCount = rec.getLineCount({ sublistId: sublistId });
+        var created   = 0;
+
+        checkGovernance('before-content-loop');
+
+        /* ── STEP 3: One record per tracking number ── */
         wmsLines.forEach(function (line) {
 
             if (!line.item || line.is_picked !== 'picked') return;
+            if (!Number(line.quantity)) return;
 
             var itemName = line.item;
-            var qty = Number(line.quantity) || 0;
+            var weight   = weightCache[itemName] || 1;
 
             (line.tracking_data || []).forEach(function (track) {
 
                 var tracking = track.trackingNumber;
-                var sscc = track.SSCC || '';
-
+                var sscc     = track.SSCC || '';
                 if (!tracking) return;
 
-                var key = tracking + '|' + itemName;
+                var lineIdx = lineCount + created;
 
-                if (!required[key]) {
-                    required[key] = {
-                        qty: 0,
-                        sscc: sscc
-                    };
-                }
-
-                required[key].qty += qty;
-
-            });
-
-        });
-
-        return required;
-    }
-
-    /* ======================
-       CREATE PACKAGE CONTENTS (SMART)
-    ====================== */
-
-    function createPackageContentsSmart(fulfillmentId, wmsLines) {
-
-        var rec = record.load({
-            type: record.Type.ITEM_FULFILLMENT,
-            id: fulfillmentId,
-            isDynamic: true
-        });
-
-        var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
-
-        var existingMap = getExistingPackageCounts(fulfillmentId);
-        var requiredMap = buildRequiredCounts(wmsLines);
-
-        var created = 0;
-
-        Object.keys(requiredMap).forEach(function (key) {
-
-            var requiredQty = requiredMap[key];
-            var existingQty = existingMap[key] || 0;
-            var sscc = requiredMap[key].sscc;
-
-
-            var missing = requiredQty - existingQty;
-
-            if (missing <= 0) return;
-
-            var parts = key.split('|');
-            var tracking = parts[0];
-            var itemName = parts[1];
-
-            for (var i = 0; i < missing; i++) {
-
-                rec.selectNewLine({ sublistId: sublistId });
-
-                rec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_pkgbox',
-                    value: created + 1
-                });
-
-                rec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_pkg_trackingnumber',
-                    value: tracking
-                });
-
-                rec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_pkg_desc',
-                    value: itemName + '/1'
-                });
-
-                rec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecordhj_tc_packagecontentslbs',
-                    value: getItemWeight(getItemIdByName(itemName))
-                });
-
-                rec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecord_jyswms_item_not_populated',
-                    value: true
-                });
-
-                rec.setCurrentSublistValue({
-                    sublistId: sublistId,
-                    fieldId: 'custrecord_jyswms_createdfrom',
-                    value: true
-                });
+                rec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_pkgbox',                  line: lineIdx, value: created + 1    });
+                rec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_pkg_trackingnumber',      line: lineIdx, value: tracking        });
+                rec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_pkg_desc',                line: lineIdx, value: itemName + '/1' });
+                rec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_tc_packagecontentslbs',   line: lineIdx, value: weight          });
+                rec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecord_jyswms_item_not_populated', line: lineIdx, value: true            });
+                rec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecord_jyswms_createdfrom',        line: lineIdx, value: true            });
 
                 if (sscc) {
-
-                    rec.setCurrentSublistValue({
-                        sublistId: sublistId,
-                        fieldId: 'custrecordhj_ucc',
-                        value: sscc
-                    });
-
+                    rec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_ucc', line: lineIdx, value: sscc });
                 }
-                rec.commitLine({ sublistId: sublistId });
 
                 created++;
-            }
-
+            });
         });
 
         rec.save({
-            enableSourcing: true,
+            enableSourcing:        true,
             ignoreMandatoryFields: true
         });
 
-        log.audit('PACKAGE CONTENT CREATED', created);
+        log.audit('PACKAGE_CONTENT_CREATED', created + ' records created');
+        checkGovernance('after-content-save');
     }
 
-    function getItemWeight(itemId) {
-
-        try {
-            var itemData = search.lookupFields({
-                type: search.Type.INVENTORY_ITEM,
-                id: itemId,
-                columns: ['weight']
-            });
-
-            return Number(itemData.weight) || 1;
-
-        } catch (e) {
-            return 1;
+    /* ═══════════════════════════════════════════════════════════════════════
+       GOVERNANCE GUARD
+    ═══════════════════════════════════════════════════════════════════════ */
+    function checkGovernance(label) {
+        var remaining = runtime.getCurrentScript().getRemainingUsage();
+        log.audit('GOVERNANCE [' + label + ']', 'Remaining units: ' + remaining);
+        if (remaining < GOVERNANCE_WARN_THRESHOLD) {
+            log.error('GOVERNANCE_LOW', 'Low governance at [' + label + ']: ' + remaining + ' units left');
         }
     }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       LEGACY HELPERS — retained, no longer called in hot paths
+    ═══════════════════════════════════════════════════════════════════════ */
+    function getItemWeight(itemId) {
+        try {
+            var itemData = search.lookupFields({ type: search.Type.INVENTORY_ITEM, id: itemId, columns: ['weight'] });
+            return Number(itemData.weight) || 1;
+        } catch (e) { return 1; }
+    }
+
     function getItemIdByName(itemName) {
-
         var itemId = null;
-
-        var itemSearchObj = search.create({
-            type: "item",
-            filters: [
-                ["itemid", "is", itemName]
-            ],
-            columns: [
-                search.createColumn({ name: "internalid" })
-            ]
+        search.create({
+            type:    'item',
+            filters: [['itemid', 'is', itemName]],
+            columns: [search.createColumn({ name: 'internalid' })]
+        }).run().each(function (result) {
+            itemId = result.getValue({ name: 'internalid' });
+            return false;
         });
-
-        itemSearchObj.run().each(function (result) {
-
-            itemId = result.getValue({ name: "internalid" });
-
-            return false; // stop after first match
-        });
-
         return itemId;
     }
 
-    /* ======================
+    /* ═══════════════════════════════════════════════════════════════════════
        UI
-    ====================== */
-
+    ═══════════════════════════════════════════════════════════════════════ */
     function renderSuccess(form, id) {
-
-        form.addField({
-            id: 'custpage_msg',
-            type: ui.FieldType.INLINEHTML,
-            label: ' '
-        }).defaultValue =
-            '<h3 style="color:green">Success</h3>' +
-            '<p>Fulfillment: ' + id + '</p>';
+        form.addField({ id: 'custpage_msg', type: ui.FieldType.INLINEHTML, label: ' ' })
+            .defaultValue = '<h3 style="color:green">Success</h3><p>Fulfillment: ' + id + '</p>';
     }
 
     function renderError(form, e) {
-
-        form.addField({
-            id: 'custpage_err',
-            type: ui.FieldType.INLINEHTML,
-            label: ' '
-        }).defaultValue =
-            '<h3 style="color:red">Error</h3><p>' + e + '</p>';
+        form.addField({ id: 'custpage_err', type: ui.FieldType.INLINEHTML, label: ' ' })
+            .defaultValue = '<h3 style="color:red">Error</h3><p>' + e + '</p>';
     }
 
     return { onRequest: onRequest };

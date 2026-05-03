@@ -5,78 +5,43 @@
 define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/log', './Inventory/inventoryUtils'],
     function (serverWidget, record, search, runtime, https, log, inventoryUtils) {
 
-        const ITEM_TYPES = [
+        const ITEM_TYPES = new Set([
             'inventoryitem', 'noninventoryitem', 'serviceitem',
             'assemblyitem', 'downloaditem', 'giftcertificateitem', 'kititem'
-        ];
+        ]);
 
         function afterSubmit(context) {
             try {
                 let itemIds = [];
-                let recId, recType, rec;
+                let rec, recType;
 
-                if (context.type === context.UserEventType.DELETE) {
+                const isDelete = context.type === context.UserEventType.DELETE;
 
-                    recId = context.oldRecord.id;
-                    recType = context.oldRecord.type;
+                if (isDelete) {
                     rec = context.oldRecord;
-
-                    log.debug("Record Info (DELETE)", { recId, recType });
-
-                    if (ITEM_TYPES.includes(recType)) {
-                        itemIds.push(recId.toString());
-                    }
-                    else if (recType == 'itemreceipt') {
-
-                        log.debug("itemreceipt - (Delete)", { recId, recType });
-                        itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
-
-                    }
-                    else {
-                        itemIds = collectItemIdsFromSublist(recId, recType, 'inventory', 'item', rec);
-                    }
-
+                    recType = rec.type;
                 } else {
-                  
-                    recId = context.newRecord.id || "";
-                    recType = context.newRecord.type || "";
                     rec = context.newRecord;
-
-                    // //log.debug("Record Info (CREATE/EDIT)", { recId, recType });
-
-                    if (ITEM_TYPES.includes(recType)) {
-                        // let oldRec = context.oldRecord;
-                        // let newRec = context.newRecord;
-
-                        // let oldL41 = oldRec.getValue({ fieldId: 'custitem_l41_inventory_on_hand' });
-                        // let oldL60 = oldRec.getValue({ fieldId: 'custitem_l60_inventory_on_hand' });
-                        // let newL41 = newRec.getValue({ fieldId: 'custitem_l41_inventory_on_hand' });
-                        // let newL60 = newRec.getValue({ fieldId: 'custitem_l60_inventory_on_hand' });
-
-                        // if (oldL41 !== newL41 || oldL60 !== newL60)
-                        {
-                            ////log.debug("Inventory Changed", { recId });
-                            itemIds.push(recId.toString());
-                        }
-                       // return;
-                    }
-
-                    else if (recType === 'itemreceipt') {
-                        log.error("itemreceipt - (CREATE/EDIT)", { recId, recType });
-                        itemIds = collectItemIdsFromSublist(recId, recType, 'item', 'item', rec);
-
-                    }
-                    else {
-                        itemIds = collectItemIdsFromSublist(recId, recType, 'inventory', 'item', rec);
-                    }
+                    recType = rec.type;
                 }
 
-                // Final processing
-                if (itemIds.length) {
-                    log.debug("Record Info (CREATE/EDIT)", { recId, recType });
-                    processInventory(itemIds);
+                if (ITEM_TYPES.has(recType)) {
+                    // Single item record saved — just push its own ID
+                    itemIds.push(rec.id.toString());
+
+                } else if (recType === 'itemreceipt') {
+                    // Item Receipt uses 'item' sublist with field 'item'
+                    itemIds = collectItemIdsFromSublist(rec, 'item', 'item');
+
                 } else {
-                    //log.debug("No Item IDs Found", { recId, recType });
+                    // Bin Transfer, Inventory Adjustment, Inventory Part etc.
+                    // all use 'inventory' sublist with field 'item'
+                    itemIds = collectItemIdsFromSublist(rec, 'inventory', 'item');
+                }
+
+                if (itemIds.length) {
+                    log.debug("afterSubmit - Processing", { recType, recId: rec.id, itemCount: itemIds.length });
+                    processInventory(itemIds);
                 }
 
             } catch (e) {
@@ -85,39 +50,56 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                     message: e.message || e.toString(),
                     stack: e.stack
                 });
-                // optionally rethrow if you want NetSuite to stop the transaction
-                // throw e;
             }
         }
 
-        /** Collects item IDs from a given sublist */
-        function collectItemIdsFromSublist(recId, recType, sublistId, fieldId, rec) {
+        /**
+         * Reads a sublist and returns deduplicated item IDs
+         */
+        function collectItemIdsFromSublist(rec, sublistId, fieldId) {
             try {
-                //  const rec = record.load({ id: recId, type: recType });
                 const lineCount = rec.getLineCount({ sublistId });
+                const seen = new Set();
                 const ids = [];
 
                 for (let i = 0; i < lineCount; i++) {
                     const itemId = rec.getSublistValue({ sublistId, fieldId, line: i });
-                    if (itemId) ids.push(itemId.toString());
+                    if (itemId && !seen.has(itemId.toString())) {
+                        seen.add(itemId.toString());
+                        ids.push(itemId.toString());
+                    }
                 }
+
+                log.debug("collectItemIdsFromSublist", { sublistId, lineCount, uniqueItems: ids.length });
                 return ids;
+
             } catch (e) {
-                log.error(`Error collecting item IDs from ${sublistId}`, e.message);
+                log.error("collectItemIdsFromSublist Error", { sublistId, message: e.message });
                 return [];
             }
         }
 
-        /** Fetches inventory & sends it to API */
+        /**
+         * Fetches inventory for given item IDs and sends to external API
+         */
         function processInventory(itemIds) {
-            const params = { itemIds };
-            //  //log.debug("Inventory Params", params);
+            try {
+                const inventoryData = inventoryUtils.getInventory({ itemIds }, 1000, 0);
 
-            const inventoryData = inventoryUtils.getInventory(params, 1000, 0);
-            //  //log.debug("Inventory Data", inventoryData);
+                if (!inventoryData || inventoryData.status !== 200) {
+                    log.error("processInventory - Bad inventory response", inventoryData);
+                    return;
+                }
 
-            const apiStatus = sendData(inventoryData);
-            log.error("API Response", apiStatus);
+                // Use sendData from inventoryUtils to avoid duplicating token logic
+                const apiStatus = sendData(inventoryData); 
+
+
+              //  log.error("processInventory - API Response", apiStatus);
+
+            } catch (e) {
+                log.error("processInventory Error", e.message);
+            }
         }
 
         /** Authenticates & returns access token */
@@ -157,7 +139,7 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                 //  //log.debug("Body",JSON.stringify(body));
 
                 const response = https.post({
-                    url: 'https://api.jyswms.com/netsuite/update-inventory',
+                    url: 'https://api.jyswms.com/netsuite/updates-inventory',
                     body: JSON.stringify(body),
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -167,9 +149,9 @@ define(['N/ui/serverWidget', 'N/record', 'N/search', 'N/runtime', 'N/https', 'N/
                 });
 
                 const raw = response.body || "";
-              
-               // log.error(body,raw);
-              
+
+                // log.error(body,raw);
+
                 const success = response.code === 200;
                 return { success, response: raw };
 

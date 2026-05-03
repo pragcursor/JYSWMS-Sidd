@@ -24,7 +24,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var locationId = newRec.getValue({ fieldId: 'custrecord_jyswms_location_id' }) || "";
             var lineLineLocation = locationId;
             var singleIf = issingleif(recordId, salesOrderId)
-             var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
+            var shipVia = newRec.getValue('custrecord_jyswms_order_ship_via');
 
             // if (shipVia != '57733' ) {
             //   log.error("not a P/U order",shipVia);
@@ -35,20 +35,20 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
             var customerId = newRec.getValue('custrecord_jyswms_customer_frm_so');
             log.error("customerId  36", customerId);
 
-         if (!customerId) {
+            if (!customerId) {
 
-    var salesOrderRec = search.lookupFields({
-        id: salesOrderId,
-        type: "salesorder",
-        columns: ['entity']
-    });
+                var salesOrderRec = search.lookupFields({
+                    id: salesOrderId,
+                    type: "salesorder",
+                    columns: ['entity']
+                });
 
-    // entity is an array → take first element
-    if (salesOrderRec.entity && salesOrderRec.entity.length > 0) {
-        customerId = salesOrderRec.entity[0].value;
-    }
-}
-           
+                // entity is an array → take first element
+                if (salesOrderRec.entity && salesOrderRec.entity.length > 0) {
+                    customerId = salesOrderRec.entity[0].value;
+                }
+            }
+
             // if (!ltlCustomer || (customerId !== '1807' && customerId !== '476')) {
             //     log.error("not an amazon order", customerId);
             //     log.error("not a P/U order", shipVia);
@@ -153,7 +153,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return;
             }
 
-           // log.error('Trigger Info', {
+            // log.error('Trigger Info', {
             //     recordId: recordId,
             //     isApproved: isApproved,
             //     itemFulfill: itemFulfill,
@@ -245,7 +245,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                                 return b.binId === binName;
                             }) === -1
                         ) {
-                            linesMap[itemId].bins.push({ binId: binName });
+                            linesMap[itemId].bins.push({ binId: binName, quantity: linePickedQty });
                         }
 
                     } else {
@@ -255,11 +255,11 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                             itemId: itemId,
                             quantity: linePickedQty,
                             locationId: lineLineLocation,
-                            bins: binName ? [{ binId: binName }] : []
+                            bins: binName ? [{ binId: binName, quantity: linePickedQty }] : []
                         };
                     }
                 }
-               // log.error('itemIdsInOrder', itemIdsInOrder);
+                // log.error('itemIdsInOrder', itemIdsInOrder);
                 var itemName = '';
                 if (itemIdsInOrder.length === 1) {
                     // get the item type from the array 
@@ -540,14 +540,14 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 var trackingObj = trackingLines(customRecId);
                 var ssccCodes = orderData.ssccCodes;
 
-                        // log.error("incoming Object - ", {
-                        //     ssccCodes: ssccCodes,
-                        //     trackingObj: trackingObj,
-                        //     orderData: orderData,
-                        //     locationId: locationId
-                        // });
+                // log.error("incoming Object - ", {
+                //     ssccCodes: ssccCodes,
+                //     trackingObj: trackingObj,
+                //     orderData: orderData,
+                //     locationId: locationId
+                // });
 
-                var singleIf = issingleif(customRecId, salesOrderId);
+                var singleIf = issingleif(customRecId, salesOrderId); //if not single IF code runs from sid logic suitelet
 
                 var soHeaderLocation = null;
                 var singleIfDestinationBin = null;
@@ -618,17 +618,19 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                     itemMap[line.itemId].total += parseFloat(line.quantity) || 0;
                 }
 
-                var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIdsInOrder);
 
                 var adjustmentObj = {};
 
-                for (var key in itemMap) {
+                if (soHeaderLocation != 23) {
+                    var itemAvailQty = getItemAvailableQtyMapByLocation(locationId, itemIdsInOrder);
+                    for (var key in itemMap) {
 
-                    var itemData = itemMap[key];
-                    var availableQty = parseFloat(itemAvailQty[key] || 0);
+                        var itemData = itemMap[key];
+                        var availableQty = parseFloat(itemAvailQty[key] || 0);
 
-                    if (availableQty < itemData.total) {
-                        adjustmentObj[key] = itemData.total - availableQty;
+                        if (availableQty < itemData.total) {
+                            adjustmentObj[key] = itemData.total - availableQty;
+                        }
                     }
                 }
                 // log.error("adjustmentObj", adjustmentObj)
@@ -719,9 +721,9 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         });
                     }
 
-                    inventoryDetailSubrecord.selectNewLine({
-                        sublistId: 'inventoryassignment'
-                    });
+                    // inventoryDetailSubrecord.selectNewLine({
+                    //     sublistId: 'inventoryassignment'
+                    // });
 
                     var fulfillmentBin;
 
@@ -731,21 +733,68 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                         fulfillmentBin = (itemData.locationId == 9) ? 4859 : 16692;
                     }
 
-                    inventoryDetailSubrecord.setCurrentSublistValue({
-                        sublistId: 'inventoryassignment',
-                        fieldId: 'binnumber',
-                        value: fulfillmentBin
-                    });
+                    if (locationId == 23) {
+                        for (var m = 0; m < itemData.bins; m++) {
+                            var bindetail = itemData.bins[m];
+                            var binNumber = bindetail.binId;
+                            var binQty = parseFloat(bindetail.quantity) || 0;
+                            inventoryDetailSubrecord.selectNewLine({
+                                sublistId: 'inventoryassignment'
+                            });
 
-                    inventoryDetailSubrecord.setCurrentSublistValue({
-                        sublistId: 'inventoryassignment',
-                        fieldId: 'quantity',
-                        value: itemData.total
-                    });
+                            inventoryDetailSubrecord.setCurrentSublistValue({
+                                sublistId: 'inventoryassignment',
+                                fieldId: 'binnumber',
+                                value: binNumber
+                            });
 
-                    inventoryDetailSubrecord.commitLine({
-                        sublistId: 'inventoryassignment'
-                    });
+                            inventoryDetailSubrecord.setCurrentSublistValue({
+                                sublistId: 'inventoryassignment',
+                                fieldId: 'quantity',
+                                value: binQty
+                            });
+
+                            inventoryDetailSubrecord.commitLine({
+                                sublistId: 'inventoryassignment'
+                            });
+                        }
+                    } else {
+
+                        inventoryDetailSubrecord.selectNewLine({
+                            sublistId: 'inventoryassignment'
+                        });
+
+                        inventoryDetailSubrecord.setCurrentSublistValue({
+                            sublistId: 'inventoryassignment',
+                            fieldId: 'binnumber',
+                            value: fulfillmentBin
+                        });
+
+                        inventoryDetailSubrecord.setCurrentSublistValue({
+                            sublistId: 'inventoryassignment',
+                            fieldId: 'quantity',
+                            value: itemData.total
+                        });
+
+                        inventoryDetailSubrecord.commitLine({
+                            sublistId: 'inventoryassignment'
+                        });
+                    }
+                    // inventoryDetailSubrecord.setCurrentSublistValue({
+                    //     sublistId: 'inventoryassignment',
+                    //     fieldId: 'binnumber',
+                    //     value: fulfillmentBin
+                    // });
+
+                    // inventoryDetailSubrecord.setCurrentSublistValue({
+                    //     sublistId: 'inventoryassignment',
+                    //     fieldId: 'quantity',
+                    //     value: itemData.total
+                    // });
+
+                    // inventoryDetailSubrecord.commitLine({
+                    //     sublistId: 'inventoryassignment'
+                    // });
 
                     itemFulfillment.commitLine({ sublistId: 'item' });
 
@@ -831,7 +880,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
     function createAdjustment(adjustmentObj, locationId, headerID, salesOrderId) {
         try {
             if (!adjustmentObj || Object.keys(adjustmentObj).length === 0) {
-               // log.error("No adjustments required");
+                // log.error("No adjustments required");
                 return null;
             }
 
@@ -1067,7 +1116,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
                 if (existingTransferId) {
 
-                  //  log.audit("Using Existing Transfer", existingTransferId);
+                    //  log.audit("Using Existing Transfer", existingTransferId);
 
                     transferRec = record.load({
                         type: record.Type.INVENTORY_TRANSFER,
@@ -1077,7 +1126,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
 
                 } else {
 
-                  //  log.audit("Creating New Transfer", salesOrderId);
+                    //  log.audit("Creating New Transfer", salesOrderId);
 
                     transferRec = record.create({
                         type: record.Type.INVENTORY_TRANSFER,
@@ -1299,7 +1348,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 itemQtyMap[internalId] += parseFloat(availableQty || 0);
             });
         });
-       // log.error("itemQtyMap", itemQtyMap)
+        // log.error("itemQtyMap", itemQtyMap)
         return itemQtyMap;
     }
 
@@ -1361,7 +1410,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return [];
             }
 
-          //  log.error("ssccCodes", ssccCodes);
+            //  log.error("ssccCodes", ssccCodes);
 
             // Build dynamic OR filter for all SSCC codes
             var filters = [];
@@ -1383,7 +1432,7 @@ define(['N/record', 'N/url', 'N/https', 'N/log', 'N/search'], function (record, 
                 return true;
             });
 
-           // log.error('Matched Internal IDs', internalIds);
+            // log.error('Matched Internal IDs', internalIds);
             return internalIds;
 
         } catch (e) {

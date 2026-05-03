@@ -119,7 +119,7 @@ define(['N/record', 'N/log', 'N/search'], (record, log, search) => {
                         value: item.lineuniquekey
                     });
 
-                    log.error('Creating New Record');
+                   // log.error('Creating New Record');
                 }
 
                 // 🔁 COMMON FIELD SET (for both create + update)

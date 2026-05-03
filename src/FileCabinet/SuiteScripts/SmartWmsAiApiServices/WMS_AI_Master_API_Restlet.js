@@ -50,7 +50,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
             switch (action) {
                 case 'get_unapproved_adjustments':
-                    return inventoryApprovalUtil.getUnapprovedAdjustments(context);
+                    return inventoryApprovalUtil.getUnapprovedInventoryAdjustments(context);
+                case 'get_unapproved_bin_transfers':
+                    return inventoryApprovalUtil.getUnapprovedBinTransfers(context);
                 case 'get_oldBinTransfers':
                     return inventoryApprovalUtil.getOldBinTransfers(context);
                 case 'get_oldUnpickedOrders':
@@ -71,16 +73,12 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     return orderUtils.getAmzlOrders(context, pageSize, startIndex);
                 case 'get_dropShipOrders':
                     return orderUtils.getDropShipOrders_helperfunction(context, pageSize, startIndex); //orderUtils.getDropShipOrders(context, pageSize, startIndex);
-                // case 'get_dropShipOrders':
-                //     return orderUtils.getDropShipOrders_helperfunctionGtOrders(context, pageSize, startIndex); 
-                case 'getDropShipOrders_helperfunctionGtOrders':
-                    return orderUtils.getDropShipOrders_helperfunctionGtOrders(context, pageSize, startIndex);
                 case 'get_partaillDropShipOrders':
                     return orderUtils.getDropShipOrders_partials(context, pageSize, startIndex);
                 case 'getDropShipOrdersPerOrder':
                     return orderUtils.getDropShipOrdersPerOrder(context, pageSize, startIndex);
-                case 'getOrdersDUP':
-                    return orderUtils.getDropShipOrders_helperfunction(context, pageSize, startIndex);  //getDropShipOrders_helperfunction
+                case 'getOrders_L74':
+                    return orderUtils.getDropShipOrders_L74(context, pageSize, startIndex);  //getDropShipOrders_helperfunction
                 case 'getTestFunction':
                     return orderUtils.getDropShipOrders(context, pageSize, startIndex);
                 case 'get_UnpickedOrders':
@@ -111,7 +109,9 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                     return trackingUtils.getShippingLineData(context, pageSize, startIndex);
                 case 'get_inventory':
                     return inventoryUtils.processAllItems(context, pageSize, startIndex); // getInventory(context, pageSize, startIndex);processAllItems processAllItems
-                case 'get_fullfillOrders':
+                case 'get_inventory_per_item':
+                    return inventoryUtils.getInventory(context, pageSize, startIndex);
+                    case 'get_fullfillOrders':
                     return orderUtils.getFullFillOrders(context, pageSize, startIndex);
                 case 'get_binInventoryDetail':
                     return binUtils.getBinInventoryDetail(context);
@@ -1090,7 +1090,7 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                         type: "customrecord_jyswms_dropship_orders",
                         isDynamic: true
                     });
-                    log.error("Creating New Record");
+                    // log.error("Creating New Record");
                 }
             } catch (e) {
                 log.error("Error Loading/Creating Header Record", e);
@@ -1493,7 +1493,8 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
                 ],
                 columns: [
                     search.createColumn({ name: 'internalid' }),
-                    search.createColumn({ name: 'custrecord_wms_ai_api_custrec_response' })
+                    search.createColumn({ name: 'custrecord_wms_ai_api_custrec_response' }),
+                    search.createColumn({ name: 'custrecordwms_ai_api_custrec_error' })
                 ]
             });
 
@@ -1508,6 +1509,14 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
             var responseValue = results[0].getValue({
                 name: 'custrecord_wms_ai_api_custrec_response'
+            });
+          
+           // var responseValue = results[0].getValue({
+           //      name: 'custrecord_wms_ai_api_custrec_response'
+           //  });
+          
+            var responseVal = results[0].getValue({
+                name: 'custrecordwms_ai_api_custrec_error'
             });
 
             return responseValue ? responseValue : 'Record already exists';
@@ -1861,13 +1870,13 @@ define(['N/file', 'N/record', 'N/error', 'N/log', 'N/https', 'N/search', 'N/runt
 
                             binTransferRec.commitLine({ sublistId: 'inventory' });
 
-                            log.audit('BinTransfer Record - Before Save', {
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty,
-                                fromBin: binId,
-                                toBin: bulkStageBin
-                            });
+                            // log.audit('BinTransfer Record - Before Save', {
+                            //     salesOrderId: salesOrderId,
+                            //     itemId: itemId,
+                            //     pickQty: pickQty,
+                            //     fromBin: binId,
+                            //     toBin: bulkStageBin
+                            // });
 
                             // Save bin transfer with error handling
                             // var savedId = null;

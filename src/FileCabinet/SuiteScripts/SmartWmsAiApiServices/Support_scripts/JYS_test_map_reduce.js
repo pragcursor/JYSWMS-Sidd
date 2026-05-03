@@ -10,7 +10,12 @@ define(['N/search', 'N/record', 'N/log'], function (search, record, log) {
         var packageSearch = search.create({
             type: "customrecordhj_tc_package_contents",
             filters: [
-                ["created", "within", "today"]
+                // ["created", "within", "today"]
+                ["custrecordhj_tc_packagecontentslbs","isempty",""], 
+                "AND", 
+                  ["created","within","4/1/2026 12:00 am","4/24/2026 11:59 pm"], 
+                "AND", 
+                ["custrecord_hj_packagecontents_sublist","noneof","@NONE@"]
             ],
             columns: [
                 search.createColumn({ name: "internalid" })

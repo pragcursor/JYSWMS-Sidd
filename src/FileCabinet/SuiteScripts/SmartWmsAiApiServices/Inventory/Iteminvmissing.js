@@ -3,8 +3,8 @@
  * @NModuleScope Public
  */
 define([
-    './inventoryUtils.js',
-    '../JYSWMS_generateToken_API.js',
+    './inventoryUtils',
+    '../JYSWMS_generateToken_API',
     'N/log',
     'N/https'
 ], function (inventoryUtils, tokenModule, log, https) {
@@ -84,7 +84,7 @@ define([
         try {
 
             var response = https.post({
-                url: 'https://api.jyswms.com/netsuite/update-inventory',
+                url: 'https://api.jyswms.com/netsuite/updates-inventory',
                 body: JSON.stringify(body),
                 headers: {
                     'Authorization': 'Bearer ' + token,

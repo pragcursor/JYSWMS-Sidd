@@ -26,22 +26,34 @@ define(['N/record', 'N/log'], function (record, log) {
             //     type: record.Type.INVENTORY_ITEM, // change if needed
             //     id: itemId
             // });
-             var itemRec = record.load({
+            //  var itemRec = record.load({
+            //     type: 'customrecordhj_tc_package_contents', // change if needed
+            //     id: itemId
+            // });
+
+            // Submit Record
+            // var savedId = itemRec.save({
+            //     enableSourcing: true,
+            //     ignoreMandatoryFields: true
+            // });
+
+            // i want to delte the custom record instead of loading and submitting it
+            record.delete({
                 type: 'customrecordhj_tc_package_contents', // change if needed
                 id: itemId
             });
 
-            // Submit Record
-            var savedId = itemRec.save({
-                enableSourcing: true,
-                ignoreMandatoryFields: true
-            });
+            // response.write(JSON.stringify({
+            //     status: 200,
+            //     message: "Item loaded and submitted successfully",
+            //     itemId: savedId
+            // }));
 
             response.write(JSON.stringify({
                 status: 200,
-                message: "Item loaded and submitted successfully",
-                itemId: savedId
+                message: "Item deleted successfully with id: " + itemId
             }));
+
 
         } catch (e) {
 

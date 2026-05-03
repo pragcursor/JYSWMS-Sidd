@@ -28,7 +28,7 @@ define([
     'N/https',
     'N/log',
     'N/search',
-    '../JYSWMS_generateToken_API.js'
+    '../JYSWMS_generateToken_API'
 ], function (ui, record, https, log, search, tokenModule) {
 
     /* ======================================
@@ -54,7 +54,7 @@ define([
             var pickMapByLine = buildPickMapByLine(wmsLines);
             var pickMapByItem = buildPickMapByItem(wmsLines);
 
-            var allTracking      = extractTrackingNumbers(wmsLines);
+            var allTracking = extractTrackingNumbers(wmsLines);
             var existingTracking = getExistingTrackingNumbers(allTracking);
 
             // FIX 2: filter only removes tracking rows, does not delete entries
@@ -67,17 +67,17 @@ define([
 
             /* ========= LOAD SO ========= */
             var salesOrderRecord = record.load({
-                type:      record.Type.SALES_ORDER,
-                id:        soId,
+                type: record.Type.SALES_ORDER,
+                id: soId,
                 isDynamic: true
             });
 
-            var orderStatus      = salesOrderRecord.getValue({ fieldId: 'status' });
-            var customer         = salesOrderRecord.getValue({ fieldId: 'entity' });
+            var orderStatus = salesOrderRecord.getValue({ fieldId: 'status' });
+            var customer = salesOrderRecord.getValue({ fieldId: 'entity' });
             var headerLocationId = salesOrderRecord.getValue({ fieldId: 'location' });
-            var singleIf         = salesOrderRecord.getValue({ fieldId: 'custbody_wms_so_single_if' });
+            var singleIf = salesOrderRecord.getValue({ fieldId: 'custbody_wms_so_single_if' });
 
-            if (orderStatus == 'Billed')            throw 'Sales Order is Billed. Cannot be processed.';
+            if (orderStatus == 'Billed') throw 'Sales Order is Billed. Cannot be processed.';
             if (customer == 476 || customer == 1807) throw 'Customer is Amazon. Cannot be processed.';
 
             /* ======================================================
@@ -93,7 +93,7 @@ define([
                 });
                 if (notPicked.length) {
                     throw 'Single IF requires ALL items to be picked. '
-                        + notPicked.length + ' line(s) not yet picked.';
+                    + notPicked.length + ' line(s) not yet picked.';
                 }
 
                 // (b) Every SO line must resolve in the pick maps with qty > 0
@@ -104,7 +104,7 @@ define([
                     var soUniqueId = salesOrderRecord.getCurrentSublistValue({
                         sublistId: 'item', fieldId: 'custcol_wms_unique_id'
                     });
-                    var soItemIdChk   = salesOrderRecord.getCurrentSublistValue({
+                    var soItemIdChk = salesOrderRecord.getCurrentSublistValue({
                         sublistId: 'item', fieldId: 'item'
                     });
                     var soItemNameChk = getItemNameById(soItemIdChk) || String(soItemIdChk);
@@ -115,8 +115,8 @@ define([
 
                     if (!inPickMap) {
                         throw 'Single IF: item ' + soItemNameChk
-                            + ' (unique_id: ' + soUniqueId + ') is not fully picked yet. '
-                            + 'Cannot create fulfillment until all lines are ready.';
+                        + ' (unique_id: ' + soUniqueId + ') is not fully picked yet. '
+                        + 'Cannot create fulfillment until all lines are ready.';
                     }
                 }
             }
@@ -129,15 +129,15 @@ define([
                 for (var i = 0; i < soLineCount; i++) {
                     salesOrderRecord.selectLine({ sublistId: 'item', line: i });
                     var soItemId = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'item' });
-                    var soLocId  = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'location' });
-                    var soQty    = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity' });
+                    var soLocId = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'location' });
+                    var soQty = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity' });
 
                     if (soLocId !== headerLocationId) {
                         nonHeaderLocationItems.push({
-                            itemId:           soItemId,
-                            locationId:       soLocId,
+                            itemId: soItemId,
+                            locationId: soLocId,
                             headerLocationId: headerLocationId,
-                            quantity:         soQty
+                            quantity: soQty
                         });
                     }
                 }
@@ -147,7 +147,7 @@ define([
             nonHeaderLocationItems.forEach(function (item) {
                 if (L74_LOCS[Number(item.locationId)]) return;
 
-                var stageBinId       = getStageBinByLocation(item.locationId);
+                var stageBinId = getStageBinByLocation(item.locationId);
                 var headerStageBinId = getStageBinByLocation(item.headerLocationId);
                 if (!stageBinId || !headerStageBinId) return;
 
@@ -166,19 +166,19 @@ define([
 
             /* ========= TRANSFORM SO -> ITEM FULFILLMENT ========= */
             var fulfillment = record.transform({
-                fromType:  record.Type.SALES_ORDER,
-                fromId:    soId,
-                toType:    record.Type.ITEM_FULFILLMENT,
+                fromType: record.Type.SALES_ORDER,
+                fromId: soId,
+                toType: record.Type.ITEM_FULFILLMENT,
                 isDynamic: true
             });
 
             fulfillment.setValue({ fieldId: 'shipstatus', value: 'C' });
 
-            var itemLineCount    = fulfillment.getLineCount({ sublistId: 'item' });
-            var hasFulfillLines  = false;
-            var packageIndexMap  = {};
+            var itemLineCount = fulfillment.getLineCount({ sublistId: 'item' });
+            var hasFulfillLines = false;
+            var packageIndexMap = {};
             var allTrackingArray = [];
-            var l74ErrorNotes    = [];
+            var l74ErrorNotes = [];
 
             /* ========= PROCESS EACH FULFILLMENT LINE ========= */
             for (var i = 0; i < itemLineCount; i++) {
@@ -197,32 +197,32 @@ define([
                 }
 
                 var itemIdInternal = fulfillment.getCurrentSublistValue({ sublistId: 'item', fieldId: 'item' });
-                var itemText       = getItemNameById(itemIdInternal) || String(itemIdInternal);
-                var remainingQty   = Number(fulfillment.getCurrentSublistValue({
+                var itemText = getItemNameById(itemIdInternal) || String(itemIdInternal);
+                var remainingQty = Number(fulfillment.getCurrentSublistValue({
                     sublistId: 'item', fieldId: 'quantityremaining'
                 })) || 0;
-                var rawLineLocId   = Number(fulfillment.getCurrentSublistValue({
+                var rawLineLocId = Number(fulfillment.getCurrentSublistValue({
                     sublistId: 'item', fieldId: 'location'
                 }));
                 var lineLocationId = singleIf ? Number(headerLocationId) : rawLineLocId;
-                var isL74          = !!L74_LOCS[lineLocationId];
+                var isL74 = !!L74_LOCS[lineLocationId];
 
                 // FIX 1: exact unique_id match — no normalization
                 var uniqueId = fulfillment.getCurrentSublistValue({
                     sublistId: 'item', fieldId: 'custcol_wms_unique_id'
                 });
 
-                var qtyToFulfill  = 0;
-                var trackingList  = [];
+                var qtyToFulfill = 0;
+                var trackingList = [];
                 var pickedBinName = null;
 
                 if (uniqueId && pickMapByLine[uniqueId] && pickMapByLine[uniqueId].qty > 0) {
                     /* Primary: exact unique_id match */
-                    var ld        = pickMapByLine[uniqueId];
-                    qtyToFulfill  = Math.min(ld.qty, remainingQty);
-                    trackingList  = ld.tracking.slice(0, qtyToFulfill);
+                    var ld = pickMapByLine[uniqueId];
+                    qtyToFulfill = Math.min(ld.qty, remainingQty);
+                    trackingList = ld.tracking.slice(0, qtyToFulfill);
                     pickedBinName = ld.pickedBin;
-                    ld.qty       -= qtyToFulfill;
+                    ld.qty -= qtyToFulfill;
                     if (ld.qty <= 0) delete pickMapByLine[uniqueId];
 
                     /*
@@ -238,21 +238,21 @@ define([
                     while (qtyToFulfill < remainingQty) {
                         var sibKey = uniqueId + '-' + sibIdx;
                         if (!pickMapByLine[sibKey] || pickMapByLine[sibKey].qty <= 0) break;
-                        var sib    = pickMapByLine[sibKey];
+                        var sib = pickMapByLine[sibKey];
                         var sibQty = Math.min(sib.qty, remainingQty - qtyToFulfill);
-                        trackingList  = trackingList.concat(sib.tracking.slice(0, sibQty));
+                        trackingList = trackingList.concat(sib.tracking.slice(0, sibQty));
                         if (!pickedBinName) pickedBinName = sib.pickedBin;
                         qtyToFulfill += sibQty;
-                        sib.qty      -= sibQty;
+                        sib.qty -= sibQty;
                         if (sib.qty <= 0) delete pickMapByLine[sibKey];
                         sibIdx++;
                     }
 
                     /* Also drain item-name fallback map for any residual qty */
                     if (qtyToFulfill < remainingQty && pickMapByItem[itemText] && pickMapByItem[itemText].qty > 0) {
-                        var imdExtra  = pickMapByItem[itemText];
-                        var extraQty  = Math.min(imdExtra.qty, remainingQty - qtyToFulfill);
-                        trackingList  = trackingList.concat(imdExtra.tracking.splice(0, extraQty));
+                        var imdExtra = pickMapByItem[itemText];
+                        var extraQty = Math.min(imdExtra.qty, remainingQty - qtyToFulfill);
+                        trackingList = trackingList.concat(imdExtra.tracking.splice(0, extraQty));
                         if (!pickedBinName) pickedBinName = imdExtra.pickedBin;
                         qtyToFulfill += extraQty;
                         imdExtra.qty -= extraQty;
@@ -261,11 +261,11 @@ define([
 
                 } else if (pickMapByItem[itemText] && pickMapByItem[itemText].qty > 0) {
                     /* Fallback: item name match (no unique_id on NS line) */
-                    var imd       = pickMapByItem[itemText];
-                    qtyToFulfill  = Math.min(imd.qty, remainingQty);
-                    trackingList  = imd.tracking.slice(0, qtyToFulfill);
+                    var imd = pickMapByItem[itemText];
+                    qtyToFulfill = Math.min(imd.qty, remainingQty);
+                    trackingList = imd.tracking.slice(0, qtyToFulfill);
                     pickedBinName = imd.pickedBin;
-                    imd.qty      -= qtyToFulfill;
+                    imd.qty -= qtyToFulfill;
                     if (imd.qty <= 0) delete pickMapByItem[itemText];
                 }
 
@@ -332,10 +332,10 @@ define([
                 }
 
                 hasFulfillLines = true;
-                var itemWeight  = getItemWeight(itemIdInternal);
+                var itemWeight = getItemWeight(itemIdInternal);
 
                 fulfillment.setCurrentSublistValue({ sublistId: 'item', fieldId: 'itemreceive', value: true });
-                fulfillment.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity',    value: qtyToFulfill });
+                fulfillment.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qtyToFulfill });
 
                 assignInventoryDetail(fulfillment, qtyToFulfill, effectiveBinId);
 
@@ -360,8 +360,8 @@ define([
 
                     allTrackingArray.push({
                         trackingNumber: trackingNumber,
-                        SSCC:           trackObj.SSCC,
-                        itemName:       itemText
+                        SSCC: trackObj.SSCC,
+                        itemName: itemText
                     });
                 });
 
@@ -370,7 +370,7 @@ define([
             if (!hasFulfillLines) throw 'No lines qualified for fulfillment.';
 
             var fulfillmentId = fulfillment.save({
-                enableSourcing:        true,
+                enableSourcing: true,
                 ignoreMandatoryFields: true
             });
 
@@ -378,8 +378,8 @@ define([
 
             if (l74ErrorNotes.length) {
                 record.submitFields({
-                    type:   record.Type.SALES_ORDER,
-                    id:     soId,
+                    type: record.Type.SALES_ORDER,
+                    id: soId,
                     values: {
                         custbody_jyswms_fufilment_error:
                             '[IF#' + fulfillmentId + '] ' + l74ErrorNotes.join(' | ')
@@ -388,15 +388,15 @@ define([
             }
 
             form.addField({
-                id:    'custpage_success',
-                type:  ui.FieldType.INLINEHTML,
+                id: 'custpage_success',
+                type: ui.FieldType.INLINEHTML,
                 label: ' '
             }).defaultValue =
                 '<h3 style="color:green">Fulfillment Created</h3>' +
                 '<p>ID: ' + fulfillmentId + '</p>' +
                 (l74ErrorNotes.length
                     ? '<p style="color:darkorange"><b>L74 Notes:</b><br>'
-                        + l74ErrorNotes.join('<br>') + '</p>'
+                    + l74ErrorNotes.join('<br>') + '</p>'
                     : '');
 
         } catch (e) {
@@ -404,8 +404,8 @@ define([
             log.error('Fulfillment Error', e);
 
             form.addField({
-                id:    'custpage_error',
-                type:  ui.FieldType.INLINEHTML,
+                id: 'custpage_error',
+                type: ui.FieldType.INLINEHTML,
                 label: ' '
             }).defaultValue = '<h3 style="color:red">Error</h3><p>' + e + '</p>';
         }
@@ -439,7 +439,7 @@ define([
                 line.tracking_data.forEach(function (track) {
                     map[key].tracking.push({
                         trackingNumber: track.trackingNumber || '',
-                        SSCC:           track.SSCC           || ''
+                        SSCC: track.SSCC || ''
                     });
                 });
             }
@@ -470,7 +470,7 @@ define([
                 line.tracking_data.forEach(function (track) {
                     map[line.item].tracking.push({
                         trackingNumber: track.trackingNumber || '',
-                        SSCC:           track.SSCC           || ''
+                        SSCC: track.SSCC || ''
                     });
                 });
             }
@@ -486,13 +486,13 @@ define([
     ====================================== */
     function filterPickedTracking(pickMap, existingTracking) {
         Object.keys(pickMap).forEach(function (key) {
-            var before   = pickMap[key].tracking.length;
+            var before = pickMap[key].tracking.length;
             var filtered = pickMap[key].tracking.filter(function (t) {
                 return !existingTracking[t.trackingNumber];
             });
-            var removed           = before - filtered.length;
+            var removed = before - filtered.length;
             pickMap[key].tracking = filtered;
-            pickMap[key].qty     -= removed; // reduce only by what was removed
+            pickMap[key].qty -= removed; // reduce only by what was removed
 
             if (pickMap[key].qty <= 0) {
                 delete pickMap[key]; // fully fulfilled
@@ -505,7 +505,7 @@ define([
        STAGE BIN BY LOCATION  (L41 & L60 only)
     ====================================== */
     function getStageBinByLocation(locationId) {
-        if (Number(locationId) === 9)  return 4859;
+        if (Number(locationId) === 9) return 4859;
         if (Number(locationId) === 15) return 16692;
         return null;
     }
@@ -519,7 +519,7 @@ define([
         if (!isNaN(parsed) && parsed > 0) return parsed;
         try {
             var results = search.create({
-                type:    'bin',
+                type: 'bin',
                 filters: [['binnumber', 'is', String(binName)]],
                 columns: [search.createColumn({ name: 'internalid' })]
             }).run().getRange({ start: 0, end: 1 });
@@ -545,13 +545,13 @@ define([
             search.create({
                 type: 'inventorybalance',
                 filters: [
-                    ['item',     'anyof',                itemId],
+                    ['item', 'anyof', itemId],
                     'AND',
-                    ['binnumber','anyof',                binId],
+                    ['binnumber', 'anyof', binId],
                     'AND',
-                    ['location', 'anyof',                locationId],
+                    ['location', 'anyof', locationId],
                     'AND',
-                    ['onhand',   'greaterthanorequalto', qty]
+                    ['onhand', 'greaterthanorequalto', qty]
                 ],
                 columns: ['onhand']
             }).run().each(function () { found = true; return false; });
@@ -572,22 +572,22 @@ define([
         var inventorybalanceSearchObj = search.create({
             type: 'inventorybalance',
             filters: [
-                ['item',     'anyof',      itemId],
+                ['item', 'anyof', itemId],
                 'AND',
-                ['binnumber','anyof',       binId],
+                ['binnumber', 'anyof', binId],
                 'AND',
-                ['onhand',   'greaterthan', quantity]
+                ['onhand', 'greaterthan', quantity]
             ],
             columns: [
-                search.createColumn({ name: 'onhand',     label: 'On Hand' }),
-                search.createColumn({ name: 'available',  label: 'Available' }),
-                search.createColumn({ name: 'binnumber',  label: 'Bin Number' }),
-                search.createColumn({ name: 'location',   label: 'Location' }),
+                search.createColumn({ name: 'onhand', label: 'On Hand' }),
+                search.createColumn({ name: 'available', label: 'Available' }),
+                search.createColumn({ name: 'binnumber', label: 'Bin Number' }),
+                search.createColumn({ name: 'location', label: 'Location' }),
                 search.createColumn({ name: 'internalid', join: 'binNumber', label: 'Internal ID' })
             ]
         });
 
-        var invExists         = false;
+        var invExists = false;
         var searchResultCount = inventorybalanceSearchObj.runPaged().count;
         log.debug('inventorybalanceSearchObj result count', searchResultCount);
 
@@ -597,7 +597,7 @@ define([
         });
 
         if (!invExists) {
-            var adjustmentObj    = {};
+            var adjustmentObj = {};
             adjustmentObj[itemId] = quantity;
             createPositiveAdjustment(adjustmentObj, locationId, binId);
             invExists = true;
@@ -620,22 +620,24 @@ define([
             var invTransferRec = record.create({
                 type: record.Type.INVENTORY_TRANSFER, isDynamic: true
             });
-            invTransferRec.setValue({ fieldId: 'location',         value: fromLocation });
+            invTransferRec.setValue({ fieldId: 'location', value: fromLocation });
             invTransferRec.setValue({ fieldId: 'transferlocation', value: toLocation });
-            invTransferRec.setValue({ fieldId: 'memo',
-                value: 'Inventory Transfer for Fulfillment - SO: ' + soId });
+            invTransferRec.setValue({
+                fieldId: 'memo',
+                value: 'Inventory Transfer for Fulfillment - SO: ' + soId
+            });
 
             invTransferRec.selectNewLine({ sublistId: 'inventory' });
-            invTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item',        value: itemId });
+            invTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
             invTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'adjustqtyby', value: quantity });
 
             var invDetail = invTransferRec.getCurrentSublistSubrecord({
                 sublistId: 'inventory', fieldId: 'inventorydetail'
             });
             invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber',   value: fromBin });
+            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: fromBin });
             invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'tobinnumber', value: toBin });
-            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity',    value: quantity });
+            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: quantity });
             invDetail.commitLine({ sublistId: 'inventoryassignment' });
             invTransferRec.commitLine({ sublistId: 'inventory' });
 
@@ -655,9 +657,9 @@ define([
             var adjRec = record.create({
                 type: record.Type.INVENTORY_ADJUSTMENT, isDynamic: true
             });
-            adjRec.setValue({ fieldId: 'subsidiary',  value: 1 });
-            adjRec.setValue({ fieldId: 'memo',        value: 'Inventory Adj for Fulfillment' });
-            adjRec.setValue({ fieldId: 'account',     value: 464 });
+            adjRec.setValue({ fieldId: 'subsidiary', value: 1 });
+            adjRec.setValue({ fieldId: 'memo', value: 'Inventory Adj for Fulfillment' });
+            adjRec.setValue({ fieldId: 'account', value: 464 });
             adjRec.setValue({ fieldId: 'adjlocation', value: locationId });
 
             log.debug('Adjustment Object', adjustmentObj);
@@ -667,8 +669,8 @@ define([
             for (var itemId in adjustmentObj) {
                 var qty = adjustmentObj[itemId];
                 adjRec.selectNewLine({ sublistId: 'inventory' });
-                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item',        value: itemId });
-                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'location',    value: locationId });
+                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
+                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'location', value: locationId });
                 adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'adjustqtyby', value: qty });
 
                 var inventoryDetail = adjRec.getCurrentSublistSubrecord({
@@ -676,7 +678,7 @@ define([
                 });
                 inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
                 inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: binId });
-                inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity',  value: qty });
+                inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: qty });
                 inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
                 adjRec.commitLine({ sublistId: 'inventory' });
             }
@@ -695,7 +697,7 @@ define([
     function assignInventoryDetail(fulfillment, qty, stageBinId) {
         if (!stageBinId) return;
         try {
-            var invDetail       = fulfillment.getCurrentSublistSubrecord({
+            var invDetail = fulfillment.getCurrentSublistSubrecord({
                 sublistId: 'item', fieldId: 'inventorydetail'
             });
             var assignmentCount = invDetail.getLineCount({ sublistId: 'inventoryassignment' });
@@ -704,7 +706,7 @@ define([
             }
             invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
             invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: stageBinId });
-            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity',  value: qty });
+            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: qty });
             invDetail.commitLine({ sublistId: 'inventoryassignment' });
         } catch (e) {
             log.error('Inventory Detail Error', e);
@@ -721,10 +723,10 @@ define([
                 type: record.Type.ITEM_FULFILLMENT, id: fulfillmentId, isDynamic: true
             });
 
-            var customerId      = fulfillmentRec.getValue({ fieldId: 'entity' });
+            var customerId = fulfillmentRec.getValue({ fieldId: 'entity' });
             var LOWES_CUSTOMERS = [1952, 639];
             var isLowesCustomer = LOWES_CUSTOMERS.indexOf(Number(customerId)) !== -1;
-            var sublistId       = 'recmachcustrecord_hj_packagecontents_sublist';
+            var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
 
             var existingCount = fulfillmentRec.getLineCount({ sublistId: sublistId });
             for (var i = existingCount - 1; i >= 0; i--) {
@@ -732,7 +734,7 @@ define([
             }
 
             var packageBoxNumber = 0;
-            var seenTracking     = {};
+            var seenTracking = {};
 
             trackingArray.forEach(function (line) {
                 if (!line.trackingNumber) return;
@@ -779,15 +781,18 @@ define([
 
     /* ======================================
        WMS API
+       
     ====================================== */
     function callWmsApi(soId) {
-        var token    = tokenModule.generateToken();
+        var token = tokenModule.generateToken();
         var response = https.get({
-            url: 'https://api.jyswms.com/dropship-sales-order-status-with-bins?sales_order_id=' + soId,
+            // url: 'https://api.jyswms.com/dropship-sales-order-status-with-bins?sales_order_id=' + soId,
+            url: 'https://jyswms-pragva.up.railway.app/dropship-sales-order-status-with-bins?sales_order_id=' + soId,
+
             headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
         });
         if (response.code !== 200) throw 'WMS API returned ' + response.code;
-        var body        = JSON.parse(response.body || '{}');
+        var body = JSON.parse(response.body || '{}');
         var sourceArray = (body.completed && body.completed.length) ? body.completed : body.notcompleted;
         return sourceArray[0].data || [];
     }
@@ -838,9 +843,9 @@ define([
             if (!trackingNumbers || !trackingNumbers.length) return existingTracking;
 
             var filters = [
-                ['type',     'anyof', 'ItemShip'],
+                ['type', 'anyof', 'ItemShip'],
                 'AND',
-                ['mainline', 'is',    'T'],
+                ['mainline', 'is', 'T'],
                 'AND'
             ];
             var trackingFilter = [];
@@ -851,7 +856,7 @@ define([
             filters = filters.concat(trackingFilter);
 
             var fulfillmentSearch = search.create({
-                type:    'itemfulfillment',
+                type: 'itemfulfillment',
                 filters: filters,
                 columns: [search.createColumn({ name: 'trackingnumber', join: 'shipmentpackage' })]
             });

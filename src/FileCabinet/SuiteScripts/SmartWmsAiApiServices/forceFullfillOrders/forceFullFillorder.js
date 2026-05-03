@@ -30,7 +30,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
 
             //var locationId = Object.keys(orderDataObject)[0]; // Assuming one location per order as per original logic
 
-            for (var locationId in orderByLocation) {
+            for (var locationId in orderByLocation) { //var Key in Object 
                 log.error("locationId from trasformed data", locationId);
                 if (!orderByLocation.hasOwnProperty(locationId)) continue;
 
@@ -38,45 +38,48 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
                 // do something with key & value
                 log.error("orderDataObject", orderDataObject);
                 log.error("locationId", locationId);
-                var itemAvailQty = getItemAvailableQtyMapByLocation(itemIds, locationId);
-                log.error("itemAvailQty", itemAvailQty);
+
 
                 var adjustmentObj = {};
 
-                for (key in orderDataObject.items) {
-                    var itemInternalId = key;
-                    log.error("itemInternalId", itemInternalId);
+                if (locationId != 23) {
+                    var itemAvailQty = getItemAvailableQtyMapByLocation(itemIds, locationId);
+                    log.error("itemAvailQty", itemAvailQty);
+                    for (key in orderDataObject.items) {
+                        var itemInternalId = key;
+                        log.error("itemInternalId", itemInternalId);
 
-                    var itemData = orderDataObject.items[key];
-                    log.error("itemData", itemData);
-                    var locationId = itemData.locationId;
-                    log.error("locationId", locationId);
+                        var itemData = orderDataObject.items[key];
+                        log.error("itemData", itemData);
+                        var locationId = itemData.locationId;
+                        log.error("locationId", locationId);
 
-                    var availableBulkBinQuantity = Number(
-                        itemAvailQty?.[locationId]?.[itemInternalId] ?? 0
-                    );
-                    log.error("availableBulkBinQuantity", availableBulkBinQuantity);
+                        var availableBulkBinQuantity = Number(
+                            itemAvailQty?.[locationId]?.[itemInternalId] ?? 0
+                        );
+                        log.error("availableBulkBinQuantity", availableBulkBinQuantity);
 
-                    var quantity = parseFloat(itemData.quantity) || 0;
-                    log.error("quantity", quantity);
-
-
-                    if (quantity) {
-
-                        var trackingNumbersLength = itemData.trackingNumber.length;
-                        log.error("trackingNumbersLength", trackingNumbersLength);
+                        var quantity = parseFloat(itemData.quantity) || 0;
+                        log.error("quantity", quantity);
 
 
-                        if (trackingNumbersLength > 0) {
-                            var fullfillmentQty = itemData.quantity;
-                        }
+                        if (quantity) {
 
-                        if (availableBulkBinQuantity < fullfillmentQty) {
-                            adjustmentObj[itemInternalId] = fullfillmentQty - availableBulkBinQuantity
+                            var trackingNumbersLength = itemData.trackingNumber.length;
+                            log.error("trackingNumbersLength", trackingNumbersLength);
+
+
+                            if (trackingNumbersLength > 0) {
+                                var fullfillmentQty = itemData.quantity;
+                            }
+
+                            if (availableBulkBinQuantity < fullfillmentQty) {
+                                adjustmentObj[itemInternalId] = fullfillmentQty - availableBulkBinQuantity
+                            }
                         }
                     }
-
                 }
+
                 log.error("adjustmentObj -- ", adjustmentObj);
 
                 if (Object.keys(adjustmentObj).length > 0) {
@@ -202,7 +205,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
 
                             //log.error("locationId",locationId);
                             var linecount = fullfillorder.getLineCount({ sublistId: 'item' });
-                            // log.error("linecount",linecount);
+                            log.error("linecount",linecount);
 
 
                             for (var j = 0; j < linecount; j++) {
@@ -217,11 +220,15 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
                                     sublistId: 'item',
                                     fieldId: 'item'
                                 });
-
+log.error("item inside for loop", item);
                                 if (orderDataObject.items[item]) {
 
                                     var dbObj = orderDataObject.items[item];
+                                    log.error("dbObj", dbObj);
+                                    var bindetails = dbObj.bindetails || [];
+                                    log.error("bindetails", bindetails);
                                     var quantity = parseFloat(dbObj.quantity) || 0;
+                                    log.error("quantity", quantity);
 
                                     if (quantity > 0) {
 
@@ -271,28 +278,56 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
                                                 line: k
                                             });
                                         }
-
+                                        //hardcoded bulk bins
                                         var bulkStageBin = (locationId == 9) ? 4859 : 16692;
+                                        var bindetails_length = bindetails.length || 0;
+                                        if (locationId == 23) {
+                                            for (var m = 0; m < bindetails_length; m++) {
+                                                var bindetail = bindetails[m];
+                                                var binNumber = bindetail.binId;
+                                                var binQty = parseFloat(bindetail.quantity) || 0;
+                                                inventoryDetailSubrecord.selectNewLine({
+                                                    sublistId: 'inventoryassignment'
+                                                });
 
-                                        inventoryDetailSubrecord.selectNewLine({
-                                            sublistId: 'inventoryassignment'
-                                        });
+                                                inventoryDetailSubrecord.setCurrentSublistValue({
+                                                    sublistId: 'inventoryassignment',
+                                                    fieldId: 'binnumber',
+                                                    value: binNumber
+                                                });
 
-                                        inventoryDetailSubrecord.setCurrentSublistValue({
-                                            sublistId: 'inventoryassignment',
-                                            fieldId: 'binnumber',
-                                            value: bulkStageBin
-                                        });
+                                                inventoryDetailSubrecord.setCurrentSublistValue({
+                                                    sublistId: 'inventoryassignment',
+                                                    fieldId: 'quantity',
+                                                    value: binQty
+                                                });
 
-                                        inventoryDetailSubrecord.setCurrentSublistValue({
-                                            sublistId: 'inventoryassignment',
-                                            fieldId: 'quantity',
-                                            value: fulfillmentQty
-                                        });
+                                                inventoryDetailSubrecord.commitLine({
+                                                    sublistId: 'inventoryassignment'
+                                                });
+                                            }
+                                        } else {
 
-                                        inventoryDetailSubrecord.commitLine({
-                                            sublistId: 'inventoryassignment'
-                                        });
+                                            inventoryDetailSubrecord.selectNewLine({
+                                                sublistId: 'inventoryassignment'
+                                            });
+
+                                            inventoryDetailSubrecord.setCurrentSublistValue({
+                                                sublistId: 'inventoryassignment',
+                                                fieldId: 'binnumber',
+                                                value: bulkStageBin
+                                            });
+
+                                            inventoryDetailSubrecord.setCurrentSublistValue({
+                                                sublistId: 'inventoryassignment',
+                                                fieldId: 'quantity',
+                                                value: fulfillmentQty
+                                            });
+
+                                            inventoryDetailSubrecord.commitLine({
+                                                sublistId: 'inventoryassignment'
+                                            });
+                                        }
                                     }
                                 }
 
@@ -562,8 +597,15 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
                 log.error("No adjustments required");
                 return null;
             }
-
-            var binId = (locationId == 9) ? 4859 : 16692;
+// hardcoded
+            var binId = "";
+            if (locationId == 9) {
+                binId = 4859;
+            }
+            else if (locationId == 15) {
+                binId = 16692;
+            }
+           
 
             var inventoryAdjRec = record.create({
                 type: record.Type.INVENTORY_ADJUSTMENT,
@@ -757,84 +799,6 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
             var sublistId = 'recmachcustrecord_sales_order_id';
             var recordId = '';
             var packageBoxNumber = 0;
-
-            //log.error("removecount",removecount);
-
-            // Track duplicates
-            // var seenTrackingNumbers = {};
-
-            //             trackingObj.forEach(function (line) {
-
-            //                 var tracking = line.trackingNumber;
-            // if (tracking) {
-            //   amzccIds.push(tracking);
-
-            // } else {
-            //    amzccIds.push(line.ssccCode);
-
-            // }
-
-            //                 //  Skip empty tracking
-            //                 // if (!tracking) {
-            //                 //     return;
-            //                 // }
-
-            //                 //  Normalize tracking
-            //                 // tracking = String(tracking).trim().toUpperCase();
-
-            //                 // //  Skip duplicate tracking
-            //                 // if (seenTrackingNumbers[tracking]) {
-            //                 //     log.debug('Duplicate Amazon tracking skipped', tracking);
-            //                 //     return;
-            //                 // }
-
-            //                 // // Mark as processed
-            //                 // seenTrackingNumbers[tracking] = true;
-
-            //                 recordId = line.recordId;
-            //                 packageBoxNumber++;
-
-            //                 salesOrderRec.selectNewLine({ sublistId: sublistId });
-
-            //                 // SSCC handling
-            //                 var amzccCode = line.ssccCode;
-            //                 if (amzccCode) {
-            //                     amzccCode = String(amzccCode);
-            //                     amzccCode = amzccCode.slice(2);
-            //                 }
-
-            //                 var fieldMap = {
-            //                     custrecord_sales_order_id: salesOrderId,
-            //                     custrecord_amzcc_code: amzccCode,
-            //                     custrecord_itemid: line.itemId,
-            //                     custrecord_ucc_code: line.upcCode,
-            //                     custrecord_wms_bulkbatch_picking: 22306500,
-            //                     custrecord_ponumber: line.poNumber,
-            //                     custrecord_pallet_sscc_code: line.palletNumber,
-            //                     custrecord_bol_tracking_number: line.bolTrackingNumber,
-            //                     custrecord_trackingnumber: tracking
-            //                 };
-
-            //                 for (var fieldId in fieldMap) {
-            //                     if (fieldMap[fieldId] !== null && fieldMap[fieldId] !== '' && fieldMap[fieldId] !== undefined) {
-            //                         try {
-            //                             salesOrderRec.setCurrentSublistValue({
-            //                                 sublistId: sublistId,
-            //                                 fieldId: fieldId,
-            //                                 value: fieldMap[fieldId]
-            //                             });
-            //                         } catch (err) {
-            //                             log.debug(
-            //                                 'Skipped field',
-            //                                 fieldId + ' - ' + err.message
-            //                             );
-            //                         }
-            //                     }
-            //                 }
-
-            //                 // log.audit('Amazon Record line added', JSON.stringify(fieldMap));
-            //                 salesOrderRec.commitLine({ sublistId: sublistId });
-            //             });
 
             trackingObj.forEach(function (line) {
 
@@ -1514,24 +1478,19 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
                 var qty = parseFloat(line.quantity) || 0;
 
                 // Location fallback logic
+                var locationMap = {
+                    'Flemington L41': 9,
+                    'L60-Hardeeville_SC': 15,
+                    'L74-Perris_CA': 23
+                };
+
                 var locationId =
                     line.location_id ||
-                    (line.location_name === 'Flemington L41' ? 9 : 15);
-
-                //   if (!locationId || qty <= 0 || line.is_picked == null || line.is_picked == 'suspended') continue;
-
-                // var isValidPicked = !isNaN(line.is_picked) && Number(line.is_picked) > 0;
-
-                //   if (!locationId || qty <= 0 || !isValidPicked) continue;
-
-                //               var pickedVal = Number(line.is_picked);
-
-                // var isValidPicked =
-                //     !isNaN(pickedVal) &&
-                //     pickedVal > 0 &&
-                //     parseInt(pickedVal, 10) === pickedVal;
-
-                // if (!locationId || qty <= 0 || !isValidPicked) continue;
+                    locationMap[line.location_name] ||
+                    null;
+                var binId = line.binInternalId || null;
+                var binqty = parseFloat(line.quantity);
+                var each_line_bindetails = { binId: binId, quantity: binqty };
                 var isValidPicked = line.is_picked === 'picked';
                 if (!locationId || qty <= 0 || !isValidPicked) continue;
 
@@ -1568,6 +1527,7 @@ define(['N/record', 'N/search', 'N/log', 'N/https', 'N/runtime', '../JYSWMS_gene
                         locationName: line.location_name || '',
                         uniqueId: line.unique_id,
                         quantity: qty,
+                        bindetails: [each_line_bindetails],
                         isPicked: line.is_picked,
                         trackingNumber: line.tracking_numbers || []
                     };

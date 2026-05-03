@@ -313,8 +313,67 @@ define([
         }
     }
 
+
+    function beforeSubmit(context) {
+        try {
+
+            if (context.type !== context.UserEventType.EDIT) return;
+
+            const rec = context.newRecord;
+
+            const lineCount = rec.getLineCount({ sublistId: 'item' });
+
+            if (lineCount <= 0) return;
+
+            // ---- Collect all line locations ----
+            let firstLineLoc = null;
+            let allSame = true;
+
+            for (let i = 0; i < lineCount; i++) {
+                const lineLoc = String(
+                    rec.getSublistValue({ sublistId: 'item', fieldId: 'location', line: i }) || ''
+                );
+
+                if (i === 0) {
+                    firstLineLoc = lineLoc;
+                } else if (lineLoc !== firstLineLoc) {
+                    allSame = false;
+                    break;
+                }
+            }
+
+            // ---- If all lines have same location, check header ----
+            if (!allSame || !firstLineLoc) {
+                log.debug('HEADER LOC SYNC | SKIP', 'Lines have different locations or no location — no header update.');
+                return;
+            }
+
+            const headerLoc = String(rec.getValue({ fieldId: 'location' }) || '');
+
+            if (headerLoc === firstLineLoc) {
+                log.debug('HEADER LOC SYNC | SKIP', 'Header location already matches line location — no update needed.');
+                return;
+            }
+
+            // ---- Sync header to line location ----
+            rec.setValue({
+                fieldId: 'location',
+                value: firstLineLoc
+            });
+
+            log.debug('HEADER LOC SYNC | UPDATED', {
+                from: headerLoc,
+                to: firstLineLoc
+            });
+
+        } catch (e) {
+            log.error('HEADER LOC SYNC | ERROR', e);
+        }
+    }
+
     return {
-        afterSubmit
+        afterSubmit, 
+        beforeSubmit
     };
 
 });

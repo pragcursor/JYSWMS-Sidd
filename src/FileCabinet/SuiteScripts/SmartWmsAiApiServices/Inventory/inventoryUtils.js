@@ -129,12 +129,15 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
             var pageSize = 1000;
             var startIndex = 0;
-
-            var allItems = getAllItems();
+            if (context && context.itemIds) {
+                var allItems = context.itemIds.split(",").map(function (id) { return id.trim(); });
+            } else {
+                var allItems = getAllItems();
+            }
 
             var batches = chunkArray(allItems, 500);
 
-          //  log.audit("Total Batches", batches.length);
+            //  log.audit("Total Batches", batches.length);
             var totalCount = 1
             var allResults = [];
             var response = {
@@ -169,8 +172,9 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 };
 
                 var inventoryData = getInventoryTemp(context);
+                // var inventoryData = getInventory(context);
 
-              //  log.audit("Processing Batch Data", inventoryData);
+                //  log.audit("Processing Batch Data", inventoryData);
                 //var inventoryData = inventoryData.data;
                 var apiStatus = sendData(inventoryData);
 
@@ -182,7 +186,9 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
 
             });
             log.audit("Final Inventory Data Summary", JSON.stringify(response));
-            return true;
+            return response;
+
+           // return true;
 
 
         } catch (e) {
@@ -194,36 +200,185 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
     }
 
 
+    // function getInventory(context, pageSize, startIndex) {
+    //     try {
+    //         var ScriptStartTime = new Date().getTime();
+    //         //   log.error('Script Started', 'Start Time: ' + ScriptStartTime / 1000 + ' seconds');
+
+    //         var scriptObj = runtime.getCurrentScript();
+    //         var inventorySearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_inventory_detail' });
+    //         //  log.error('inventory Parameter', inventorySearchId);
+    //         var Data = {};
+    //         var binId = context.binId || "";
+    //         var existingBinSequenceMap = BinSequenceSearch();
+    //         // log.error("existingBinSequenceMap",JSON.stringify(existingBinSequenceMap));
+
+
+    //         var itemIds = context.itemIds || "";
+
+    //         //   ---don't remove this section in commnets---
+    //         //    log.audit("itemIds from request", itemIds);
+    //         //    if (!itemIds) {
+    //         //     itemIds = recentUpdatedItems() || "";
+    //         //     log.audit("itemIds", itemIds.length);
+    //         //      }
+    //         //   log.audit("final itemIds", itemIds);
+
+    //         var inventorySearch = search.load({
+    //             id: inventorySearchId,
+    //             type: search.Type.ITEM
+    //         });
+    //         var filters = inventorySearch.filters || [];
+    //         // log.error("filters",JSON.stringify(filters));
+    //         if (itemIds) {
+    //             try {
+    //                 filters.push(search.createFilter({
+    //                     name: 'internalid',
+    //                     operator: search.Operator.ANYOF,
+    //                     values: itemIds
+    //                 }));
+    //                 //   log.audit("item ids", itemIds);
+    //             } catch (e) {
+    //                 log.error("error pushing item filters", e);
+    //                 var response = e.message + " - " + itemIds;
+    //                 //   log.error("response",JSON.stringify(response));
+    //             }
+    //         }
+    //         if (binId) {
+
+    //             try {
+
+    //                 filters.push(search.createFilter({
+
+    //                     name: 'binnumber',
+    //                     join: "binOnHand",
+    //                     operator: search.Operator.ANYOF,
+    //                     values: binId
+
+    //                 }));
+
+
+    //             } catch (e) {
+
+    //                 log.error("error pushing item filters", e);
+
+    //                 var response = e.message + " - " + binId;
+
+
+    //             }
+
+    //         }
+
+
+    //         // Apply updated filters back to the search
+    //         inventorySearch.filters = filters;
+
+    //         var totalCount = inventorySearch.runPaged().count;
+    //         var totalPages = Math.ceil(totalCount / pageSize);
+
+    //         //log.error("total Count", totalCount);
+
+    //         var searchResult = inventorySearch.run();
+    //         var searchRange = searchResult.getRange({ start: startIndex, end: startIndex + pageSize });
+
+    //         searchRange.forEach(function (result) {
+    //             // log.error("item search result", JSON.stringify(result));
+
+    //             var internalId = result.getValue({ name: "internalid" });
+    //             var locationId = result.getValue({ name: "location", join: "binOnHand" });
+    //             var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
+
+    //             if (!internalId || !locationId) return;
+
+    //             if (!Data[internalId]) {
+    //                 Data[internalId] = {};
+    //             }
+
+    //             if (!Data[internalId][locationId]) {
+    //                 Data[internalId][locationId] = {
+    //                     total_available: 0,
+    //                     itemDetails: []
+    //                 };
+    //             }
+
+    //             var itemData = {};
+    //             result.columns.forEach(function (column) {
+    //                 var columnName = toSnakeCase(column.label || column.name);
+    //                 if (columnName == 'location') {
+    //                     itemData['loc_internalid'] = result.getValue(column) || " ";
+    //                     itemData['location'] = result.getText(column) || " ";
+    //                 }
+    //                 else if (columnName == 'bin_number') {
+    //                     var binId = result.getValue(column);
+    //                     itemData['bin_internalid'] = result.getValue(column) || " ";
+    //                     itemData['bin_number'] = result.getText(column) || " ";
+    //                     var binData = existingBinSequenceMap[binId];
+    //                     itemData['bin_index'] = binData ? binData.bin_index : " ";
+    //                     itemData['bin_orientation'] = binData.bin_orientation || "";
+    //                     itemData['wh'] = binData.wh || "";
+    //                     itemData['room'] = binData.room || "";
+    //                     itemData['aisle_no'] = binData.aisle_no || "";
+    //                     itemData['bin'] = binData.bin || "";
+    //                 }
+    //                 else {
+    //                     itemData[columnName] = result.getText(column) || result.getValue(column);
+    //                 }
+    //             });
+
+    //             Data[internalId][locationId].itemDetails.push(itemData);
+    //             Data[internalId][locationId].total_available += availableQty;
+    //         });
+
+
+    //         var returnData = {
+    //             status: 200,
+    //             message: 'Data retrieved successfully',
+    //             summary: {
+    //                 total_records: totalCount,
+    //                 total_pages: totalPages,
+    //                 records_per_page: pageSize,
+    //                 current_page: Math.floor(startIndex / pageSize) + 1,
+    //                 pagination_info: {
+    //                     start_index: startIndex,
+    //                     end_index: startIndex + pageSize - 1,
+    //                     has_next_page: (startIndex + pageSize) < totalCount,
+    //                     has_previous_page: startIndex > 0
+    //                 }
+    //             },
+    //             data: Data
+    //         };
+    //         return returnData;
+
+    //     } catch (e) {
+    //         log.error("error message", e);
+
+    //         return {
+    //             status: 500,
+    //             message: e.message
+    //         };
+    //     }
+    // }
+
+
     function getInventory(context, pageSize, startIndex) {
         try {
             var ScriptStartTime = new Date().getTime();
-            //   log.error('Script Started', 'Start Time: ' + ScriptStartTime / 1000 + ' seconds');
 
             var scriptObj = runtime.getCurrentScript();
             var inventorySearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_inventory_detail' });
-            //  log.error('inventory Parameter', inventorySearchId);
+
             var Data = {};
             var binId = context.binId || "";
-            var existingBinSequenceMap = BinSequenceSearch();
-            // log.error("existingBinSequenceMap",JSON.stringify(existingBinSequenceMap));
-
-
             var itemIds = context.itemIds || "";
 
-            //   ---don't remove this section in commnets---
-            //    log.audit("itemIds from request", itemIds);
-            //    if (!itemIds) {
-            //     itemIds = recentUpdatedItems() || "";
-            //     log.audit("itemIds", itemIds.length);
-            //      }
-            //   log.audit("final itemIds", itemIds);
-
+            // ─── Load & filter the inventory search ───────────────────────────
             var inventorySearch = search.load({
                 id: inventorySearchId,
                 type: search.Type.ITEM
             });
+
             var filters = inventorySearch.filters || [];
-            // log.error("filters",JSON.stringify(filters));
+
             if (itemIds) {
                 try {
                     filters.push(search.createFilter({
@@ -231,90 +386,135 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                         operator: search.Operator.ANYOF,
                         values: itemIds
                     }));
-                    //   log.audit("item ids", itemIds);
                 } catch (e) {
-                    log.error("error pushing item filters", e);
-                    var response = e.message + " - " + itemIds;
-                    //   log.error("response",JSON.stringify(response));
+                    log.error("error pushing item filters", e.message + " - " + itemIds);
                 }
             }
+
             if (binId) {
-
                 try {
-
                     filters.push(search.createFilter({
-
                         name: 'binnumber',
                         join: "binOnHand",
                         operator: search.Operator.ANYOF,
                         values: binId
-
                     }));
-
-
                 } catch (e) {
-
-                    log.error("error pushing item filters", e);
-
-                    var response = e.message + " - " + binId;
-
-
+                    log.error("error pushing bin filters", e.message + " - " + binId);
                 }
-
             }
 
-
-            // Apply updated filters back to the search
             inventorySearch.filters = filters;
 
-            var totalCount = inventorySearch.runPaged().count;
-            var totalPages = Math.ceil(totalCount / pageSize);
+            // ─── Run paged (single execution, no double-count) ────────────────
+            var pagedData = inventorySearch.runPaged({ pageSize: pageSize || 1000 });
+            var totalCount = pagedData.count;
+            var totalPages = Math.ceil(totalCount / (pageSize || 1000));
 
-            //log.error("total Count", totalCount);
+            // ─── STEP 1: Collect results + track only bins we actually need ───
+            var rawRows = [];         // store raw result data first
+            var neededBinIds = {};    // only bins that appear in results
 
-            var searchResult = inventorySearch.run();
-            var searchRange = searchResult.getRange({ start: startIndex, end: startIndex + pageSize });
+            pagedData.pageRanges.forEach(function (pageRange) {
+                var page = pagedData.fetch({ index: pageRange.index });
+                page.data.forEach(function (result) {
+                    var internalId = result.getValue({ name: "internalid" });
+                    var locationId = result.getValue({ name: "location", join: "binOnHand" });
+                    if (!internalId || !locationId) return;
 
-            searchRange.forEach(function (result) {
-                // log.error("item search result", JSON.stringify(result));
+                    var binInternalId = null;
+                    result.columns.forEach(function (column) {
+                        var columnName = toSnakeCase(column.label || column.name);
+                        if (columnName === 'bin_number') {
+                            binInternalId = result.getValue(column);
+                            if (binInternalId) {
+                                neededBinIds[binInternalId] = true; // track only used bins
+                            }
+                        }
+                    });
 
-                var internalId = result.getValue({ name: "internalid" });
-                var locationId = result.getValue({ name: "location", join: "binOnHand" });
+                    rawRows.push({ result: result, internalId: internalId, locationId: locationId });
+                });
+            });
+
+            // ─── STEP 2: Fetch ONLY the bins we actually need ─────────────────
+            var existingBinSequenceMap = {};
+
+            var binIdsToFetch = Object.keys(neededBinIds);
+
+            if (binIdsToFetch.length > 0) {
+                try {
+                    var binSearch = search.create({
+                        type: 'bin',
+                        filters: [
+                            search.createFilter({
+                                name: 'internalid',
+                                operator: search.Operator.ANYOF,
+                                values: binIdsToFetch   // ← ONLY bins in results, not all 21,250
+                            })
+                        ],
+                        columns: [
+                            search.createColumn({ name: "internalid", label: "internal id" }),
+                            search.createColumn({ name: "custrecord_jyswms_sequence_number", label: "sequence number" }),
+                            search.createColumn({ name: "custrecord_bin_position", label: "Bin Orentation" }),
+                            search.createColumn({ name: "custrecord_bin_wh", label: "WH" }),
+                            search.createColumn({ name: "custrecord_bin_room", label: "Room" }),
+                            search.createColumn({ name: "custrecord_aisle_no", label: "Aisle No" }),
+                            search.createColumn({ name: "custrecord_bin_bin", label: "Bin" })
+                        ]
+                    });
+
+                    binSearch.run().each(function (result) {
+                        var bId = result.getValue({ name: 'internalid' });
+                        existingBinSequenceMap[bId] = {
+                            bin_index: parseFloat(result.getValue({ name: "custrecord_jyswms_sequence_number" })) || " ",
+                            bin_orientation: result.getValue({ name: "custrecord_bin_position" }) || "",
+                            wh: result.getValue({ name: "custrecord_bin_wh" }) || "",
+                            room: result.getValue({ name: "custrecord_bin_room" }) || "",
+                            aisle_no: result.getValue({ name: "custrecord_aisle_no" }) || "",
+                            bin: result.getValue({ name: "custrecord_bin_bin" }) || ""
+                        };
+                        return true;
+                    });
+                } catch (e) {
+                    log.error("Error fetching bin sequence data", e.message);
+                }
+            }
+
+            // ─── STEP 3: Build the output Data object ─────────────────────────
+            rawRows.forEach(function (row) {
+                var result = row.result;
+                var internalId = row.internalId;
+                var locationId = row.locationId;
                 var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
 
-                if (!internalId || !locationId) return;
-
-                if (!Data[internalId]) {
-                    Data[internalId] = {};
-                }
-
+                if (!Data[internalId]) Data[internalId] = {};
                 if (!Data[internalId][locationId]) {
-                    Data[internalId][locationId] = {
-                        total_available: 0,
-                        itemDetails: []
-                    };
+                    Data[internalId][locationId] = { total_available: 0, itemDetails: [] };
                 }
 
                 var itemData = {};
                 result.columns.forEach(function (column) {
                     var columnName = toSnakeCase(column.label || column.name);
-                    if (columnName == 'location') {
+
+                    if (columnName === 'location') {
                         itemData['loc_internalid'] = result.getValue(column) || " ";
                         itemData['location'] = result.getText(column) || " ";
-                    }
-                    else if (columnName == 'bin_number') {
-                        var binId = result.getValue(column);
-                        itemData['bin_internalid'] = result.getValue(column) || " ";
+
+                    } else if (columnName === 'bin_number') {
+                        var binInternalId = result.getValue(column);
+                        var binData = existingBinSequenceMap[binInternalId] || {};
+
+                        itemData['bin_internalid'] = binInternalId || " ";
                         itemData['bin_number'] = result.getText(column) || " ";
-                        var binData = existingBinSequenceMap[binId];
-                        itemData['bin_index'] = binData ? binData.bin_index : " ";
+                        itemData['bin_index'] = binData.bin_index || " ";
                         itemData['bin_orientation'] = binData.bin_orientation || "";
                         itemData['wh'] = binData.wh || "";
                         itemData['room'] = binData.room || "";
                         itemData['aisle_no'] = binData.aisle_no || "";
                         itemData['bin'] = binData.bin || "";
-                    }
-                    else {
+
+                    } else {
                         itemData[columnName] = result.getText(column) || result.getValue(column);
                     }
                 });
@@ -322,7 +522,6 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 Data[internalId][locationId].itemDetails.push(itemData);
                 Data[internalId][locationId].total_available += availableQty;
             });
-
 
             var returnData = {
                 status: 200,
@@ -341,18 +540,144 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 },
                 data: Data
             };
+
+            log.debug("getInventory duration ms", new Date().getTime() - ScriptStartTime);
             return returnData;
 
         } catch (e) {
             log.error("error message", e);
-
-            return {
-                status: 500,
-                message: e.message
-            };
+            return { status: 500, message: e.message };
         }
     }
 
+
+    // function getInventoryTemp(context) {
+    //     try {
+
+    //         var scriptObj = runtime.getCurrentScript();
+    //         var inventorySearchId = scriptObj.getParameter({ name: 'custscript_wms_ai_inventory_detail' });
+
+    //         var Data = {};
+    //         var binId = context.binId || "";
+    //         var itemIds = context.itemIds || "";
+
+    //         var existingBinSequenceMap = BinSequenceSearch();
+
+    //         var inventorySearch = search.load({
+    //             id: inventorySearchId,
+    //             type: search.Type.ITEM
+    //         });
+
+    //         var filters = inventorySearch.filters || [];
+
+    //         if (itemIds) {
+    //             filters.push(search.createFilter({
+    //                 name: 'internalid',
+    //                 operator: search.Operator.ANYOF,
+    //                 values: itemIds
+    //             }));
+    //         }
+
+    //         if (binId) {
+    //             filters.push(search.createFilter({
+    //                 name: 'binnumber',
+    //                 join: "binOnHand",
+    //                 operator: search.Operator.ANYOF,
+    //                 values: binId
+    //             }));
+    //         }
+
+    //         inventorySearch.filters = filters;
+
+    //         var pagedData = inventorySearch.runPaged({
+    //             pageSize: 1000
+    //         });
+
+    //         var totalCount = pagedData.count;
+
+    //         pagedData.pageRanges.forEach(function (pageRange) {
+
+    //             var page = pagedData.fetch({ index: pageRange.index });
+
+    //             page.data.forEach(function (result) {
+
+    //                 var internalId = result.getValue({ name: "internalid" });
+    //                 var locationId = result.getValue({ name: "location", join: "binOnHand" });
+    //                 var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
+
+    //                 if (!internalId || !locationId) return;
+
+    //                 if (!Data[internalId]) {
+    //                     Data[internalId] = {};
+    //                 }
+
+    //                 if (!Data[internalId][locationId]) {
+    //                     Data[internalId][locationId] = {
+    //                         total_available: 0,
+    //                         itemDetails: []
+    //                     };
+    //                 }
+
+    //                 var itemData = {};
+
+    //                 result.columns.forEach(function (column) {
+
+    //                     var columnName = toSnakeCase(column.label || column.name);
+
+    //                     if (columnName == 'location') {
+
+    //                         itemData['loc_internalid'] = result.getValue(column) || " ";
+    //                         itemData['location'] = result.getText(column) || " ";
+
+    //                     } else if (columnName == 'bin_number') {
+
+    //                         var binInternalId = result.getValue(column);
+
+    //                         itemData['bin_internalid'] = binInternalId || " ";
+    //                         itemData['bin_number'] = result.getText(column) || " ";
+
+    //                         var binData = existingBinSequenceMap[binInternalId] || {};
+
+    //                         itemData['bin_index'] = binData.bin_index || " ";
+    //                         itemData['bin_orientation'] = binData.bin_orientation || "";
+    //                         itemData['wh'] = binData.wh || "";
+    //                         itemData['room'] = binData.room || "";
+    //                         itemData['aisle_no'] = binData.aisle_no || "";
+    //                         itemData['bin'] = binData.bin || "";
+
+    //                     } else {
+
+    //                         itemData[columnName] = result.getText(column) || result.getValue(column);
+
+    //                     }
+    //                 });
+
+    //                 Data[internalId][locationId].itemDetails.push(itemData);
+    //                 Data[internalId][locationId].total_available += availableQty;
+
+    //             });
+
+    //         });
+
+    //         return {
+    //             status: 200,
+    //             message: 'Data retrieved successfully',
+    //             summary: {
+    //                 total_records: totalCount
+    //             },
+    //             data: Data
+    //         };
+
+    //     } catch (e) {
+
+    //         log.error("error message", e);
+
+    //         return {
+    //             status: 500,
+    //             message: e.message
+    //         };
+    //     }
+    // }
 
     function getInventoryTemp(context) {
         try {
@@ -364,8 +689,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
             var binId = context.binId || "";
             var itemIds = context.itemIds || "";
 
-            var existingBinSequenceMap = BinSequenceSearch();
-
+            // ─── Load & filter the inventory search ───────────────────────────
             var inventorySearch = search.load({
                 id: inventorySearchId,
                 type: search.Type.ITEM
@@ -374,92 +698,148 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
             var filters = inventorySearch.filters || [];
 
             if (itemIds) {
-                filters.push(search.createFilter({
-                    name: 'internalid',
-                    operator: search.Operator.ANYOF,
-                    values: itemIds
-                }));
+                try {
+                    filters.push(search.createFilter({
+                        name: 'internalid',
+                        operator: search.Operator.ANYOF,
+                        values: itemIds
+                    }));
+                } catch (e) {
+                    log.error("error pushing item filters", e.message + " - " + itemIds);
+                }
             }
 
             if (binId) {
-                filters.push(search.createFilter({
-                    name: 'binnumber',
-                    join: "binOnHand",
-                    operator: search.Operator.ANYOF,
-                    values: binId
-                }));
+                try {
+                    filters.push(search.createFilter({
+                        name: 'binnumber',
+                        join: "binOnHand",
+                        operator: search.Operator.ANYOF,
+                        values: binId
+                    }));
+                } catch (e) {
+                    log.error("error pushing bin filters", e.message + " - " + binId);
+                }
             }
 
             inventorySearch.filters = filters;
 
-            var pagedData = inventorySearch.runPaged({
-                pageSize: 1000
-            });
-
+            // ─── Run paged ────────────────────────────────────────────────────
+            var pagedData = inventorySearch.runPaged({ pageSize: 1000 });
             var totalCount = pagedData.count;
 
-            pagedData.pageRanges.forEach(function (pageRange) {
+            // ─── STEP 1: Collect raw rows + track only bins we need ───────────
+            var rawRows = [];
+            var neededBinIds = {};
 
+            pagedData.pageRanges.forEach(function (pageRange) {
                 var page = pagedData.fetch({ index: pageRange.index });
 
                 page.data.forEach(function (result) {
-
                     var internalId = result.getValue({ name: "internalid" });
                     var locationId = result.getValue({ name: "location", join: "binOnHand" });
-                    var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
 
                     if (!internalId || !locationId) return;
 
-                    if (!Data[internalId]) {
-                        Data[internalId] = {};
-                    }
-
-                    if (!Data[internalId][locationId]) {
-                        Data[internalId][locationId] = {
-                            total_available: 0,
-                            itemDetails: []
-                        };
-                    }
-
-                    var itemData = {};
-
                     result.columns.forEach(function (column) {
-
                         var columnName = toSnakeCase(column.label || column.name);
-
-                        if (columnName == 'location') {
-
-                            itemData['loc_internalid'] = result.getValue(column) || " ";
-                            itemData['location'] = result.getText(column) || " ";
-
-                        } else if (columnName == 'bin_number') {
-
+                        if (columnName === 'bin_number') {
                             var binInternalId = result.getValue(column);
-
-                            itemData['bin_internalid'] = binInternalId || " ";
-                            itemData['bin_number'] = result.getText(column) || " ";
-
-                            var binData = existingBinSequenceMap[binInternalId] || {};
-
-                            itemData['bin_index'] = binData.bin_index || " ";
-                            itemData['bin_orientation'] = binData.bin_orientation || "";
-                            itemData['wh'] = binData.wh || "";
-                            itemData['room'] = binData.room || "";
-                            itemData['aisle_no'] = binData.aisle_no || "";
-                            itemData['bin'] = binData.bin || "";
-
-                        } else {
-
-                            itemData[columnName] = result.getText(column) || result.getValue(column);
-
+                            if (binInternalId) {
+                                neededBinIds[binInternalId] = true; // track only used bins
+                            }
                         }
                     });
 
-                    Data[internalId][locationId].itemDetails.push(itemData);
-                    Data[internalId][locationId].total_available += availableQty;
+                    rawRows.push({ result: result, internalId: internalId, locationId: locationId });
+                });
+            });
 
+            // ─── STEP 2: Fetch ONLY the bins we actually need ─────────────────
+            var existingBinSequenceMap = {};
+            var binIdsToFetch = Object.keys(neededBinIds);
+
+            if (binIdsToFetch.length > 0) {
+                try {
+                    var binSearch = search.create({
+                        type: 'bin',
+                        filters: [
+                            search.createFilter({
+                                name: 'internalid',
+                                operator: search.Operator.ANYOF,
+                                values: binIdsToFetch  // ← ONLY bins in results, not all 21,250
+                            })
+                        ],
+                        columns: [
+                            search.createColumn({ name: "internalid", label: "internal id" }),
+                            search.createColumn({ name: "custrecord_jyswms_sequence_number", label: "sequence number" }),
+                            search.createColumn({ name: "custrecord_bin_position", label: "Bin Orentation" }),
+                            search.createColumn({ name: "custrecord_bin_wh", label: "WH" }),
+                            search.createColumn({ name: "custrecord_bin_room", label: "Room" }),
+                            search.createColumn({ name: "custrecord_aisle_no", label: "Aisle No" }),
+                            search.createColumn({ name: "custrecord_bin_bin", label: "Bin" })
+                        ]
+                    });
+
+                    binSearch.run().each(function (result) {
+                        var bId = result.getValue({ name: 'internalid' });
+                        existingBinSequenceMap[bId] = {
+                            bin_index: parseFloat(result.getValue({ name: "custrecord_jyswms_sequence_number" })) || " ",
+                            bin_orientation: result.getValue({ name: "custrecord_bin_position" }) || "",
+                            wh: result.getValue({ name: "custrecord_bin_wh" }) || "",
+                            room: result.getValue({ name: "custrecord_bin_room" }) || "",
+                            aisle_no: result.getValue({ name: "custrecord_aisle_no" }) || "",
+                            bin: result.getValue({ name: "custrecord_bin_bin" }) || ""
+                        };
+                        return true;
+                    });
+
+                } catch (e) {
+                    log.error("Error fetching bin sequence data", e.message);
+                }
+            }
+
+            // ─── STEP 3: Build the output Data object ─────────────────────────
+            rawRows.forEach(function (row) {
+                var result = row.result;
+                var internalId = row.internalId;
+                var locationId = row.locationId;
+                var availableQty = parseFloat(result.getValue({ name: "quantityavailable", join: "binOnHand" })) || 0;
+
+                if (!Data[internalId]) Data[internalId] = {};
+                if (!Data[internalId][locationId]) {
+                    Data[internalId][locationId] = { total_available: 0, itemDetails: [] };
+                }
+
+                var itemData = {};
+
+                result.columns.forEach(function (column) {
+                    var columnName = toSnakeCase(column.label || column.name);
+
+                    if (columnName === 'location') {
+                        itemData['loc_internalid'] = result.getValue(column) || " ";
+                        itemData['location'] = result.getText(column) || " ";
+
+                    } else if (columnName === 'bin_number') {
+                        var binInternalId = result.getValue(column);
+                        var binData = existingBinSequenceMap[binInternalId] || {};
+
+                        itemData['bin_internalid'] = binInternalId || " ";
+                        itemData['bin_number'] = result.getText(column) || " ";
+                        itemData['bin_index'] = binData.bin_index || " ";
+                        itemData['bin_orientation'] = binData.bin_orientation || "";
+                        itemData['wh'] = binData.wh || "";
+                        itemData['room'] = binData.room || "";
+                        itemData['aisle_no'] = binData.aisle_no || "";
+                        itemData['bin'] = binData.bin || "";
+
+                    } else {
+                        itemData[columnName] = result.getText(column) || result.getValue(column);
+                    }
                 });
 
+                Data[internalId][locationId].itemDetails.push(itemData);
+                Data[internalId][locationId].total_available += availableQty;
             });
 
             return {
@@ -472,16 +852,13 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
             };
 
         } catch (e) {
-
-            log.error("error message", e);
-
+            log.error("getInventoryTemp error", e);
             return {
                 status: 500,
                 message: e.message
             };
         }
     }
-
 
 
 
@@ -613,7 +990,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
         try {
 
             var response = https.post({
-                url: 'https://api.jyswms.com/netsuite/update-inventory',
+                url: 'https://api.jyswms.com/netsuite/updates-inventory',
                 body: JSON.stringify(body),
                 headers: {
                     'Authorization': 'Bearer ' + token,
@@ -706,7 +1083,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/https'], function (reco
                 }
             }
 
-          //  log.audit("Total unique items", uniqueItems.length);
+            //  log.audit("Total unique items", uniqueItems.length);
 
             // =====================================================
             // 🚀 SMALL PAYLOAD → DIRECT PROCESSING

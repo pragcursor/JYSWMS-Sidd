@@ -407,13 +407,13 @@ log.debug("headerId",headerId);
 
                             binTransferRec.commitLine({ sublistId: 'inventory' });
 
-                            log.audit('BinTransfer Record - Before Save', {
-                                salesOrderId: salesOrderId,
-                                itemId: itemId,
-                                pickQty: pickQty,
-                                fromBin: binId,
-                                toBin: bulkStageBin
-                            });
+                            // log.audit('BinTransfer Record - Before Save', {
+                            //     salesOrderId: salesOrderId,
+                            //     itemId: itemId,
+                            //     pickQty: pickQty,
+                            //     fromBin: binId,
+                            //     toBin: bulkStageBin
+                            // });
 
                             try {
                                 savedId = binTransferRec.save();
