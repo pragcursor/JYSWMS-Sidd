@@ -2,39 +2,59 @@
  * @NApiVersion 2.1
  * @NScriptType Suitelet
  *
- * FIXES applied to the previous version:
+ * ORIGINAL FIXES (all preserved, untouched):
+ *  FIX 1 — buildPickMapByLine: exact unique_id, no normalization.
+ *  FIX 2 — filterPickedTracking: only removes tracking rows, reduces qty by removed count.
+ *  FIX 3 — Single-IF gate runs AFTER filtering with checks (a) + (b).
  *
- *  FIX 1 — buildPickMapByLine: key is the EXACT unique_id string from WMS.
- *           Previous version split on [-_] so "709707101_1" became "709707101",
- *           which never matched custcol_wms_unique_id on the NS fulfillment line,
- *           always falling back to item-name and losing pickedBin for L74.
+ * PERFORMANCE — SuiteQL replaces every search() call where possible:
+ *  SQL 1 — resolveItemsBySuiteQL:      items + weights in one SQL query             (replaces per-line lookupFields × N)
+ *  SQL 2 — resolveBinsBySuiteQL:       bin names → internal IDs in one SQL query    (replaces per-line bin search × N)
+ *  SQL 3 — getExistingTrackingSQL:     existing tracking numbers in one SQL query   (replaces batched OR-filter searches)
+ *  SQL 4 — checkInventorySQL:          inventory balance check in one SQL query     (replaces runPaged + run().each double-execution)
+ *  SQL 5 — checkInventoryAvailSQL:     L74 inventory check via SQL                  (replaces per-line inventorybalance search)
  *
- *  FIX 2 — filterPickedTracking: only removes already-fulfilled tracking rows.
- *           Does NOT delete entries or reset qty to tracking.length.
- *           qty is reduced only by the count of removed tracking rows.
- *           Previous version deleted the entire entry if all tracking was filtered,
- *           even when qty was still outstanding — causing single-IF to pass the
- *           gate but then skip every fulfillment line.
+ * OTHER OPTIMIZATIONS:
+ *  OPT 1 — createCustomPackageContents: isDynamic:false + setSublistValue (no select/commit overhead)
+ *  OPT 2 — Package content lines cleared via isDynamic:false removeLine (avoids dynamic overhead)
+ *  OPT 3 — customerId passed in — no second record.load of fulfillment
+ *  OPT 4 — Governance checkpoints at key stages
+ *  OPT 5 — getInventoryByItemAndBin: single SQL replaces double search execution
  *
- *  FIX 3 — Single-IF gate now runs AFTER filtering and does TWO checks:
- *           (a) All WMS lines with qty > 0 must be is_picked = "picked".
- *           (b) Every SO item line must resolve to a pick-map entry with qty > 0.
- *           Previous version only checked raw wmsLines before filtering, so
- *           partial orders slipped through and created multiple fulfillments.
+ * BIN CHANGES (2025):
+ *  - Non-L74 fulfillment now uses PICKED BIN (not bulk/stage bin) as the fulfillment bin.
+ *  - Positive inventory adjustment (when needed) goes to the PICKED BIN.
+ *  - Inventory Transfer (single-IF cross-location): moves FROM picked bin (source loc)
+ *    TO header location's BULK/STAGE BIN. Fulfillment for transferred lines uses the bulk bin.
+ *  - L74 logic is completely UNTOUCHED.
+ *  - Package contents loop handles >140 qty (no hard cap).
  */
+
 define([
     'N/ui/serverWidget',
     'N/record',
     'N/https',
     'N/log',
     'N/search',
-    '../JYSWMS_generateToken_API.js'
-], function (ui, record, https, log, search, tokenModule) {
+    'N/query',
+    'N/runtime',
+    '../JYSWMS_generateToken_API'
+], function (ui, record, https, log, search, query, runtime, tokenModule) {
 
     /* ======================================
        CONSTANTS
     ====================================== */
     var L74_LOCS = { 23: true, 24: true };
+    var GOVERNANCE_WARN = 300;
+
+    /* ======================================
+       GOVERNANCE HELPER
+    ====================================== */
+    function checkGovernance(label) {
+        var rem = runtime.getCurrentScript().getRemainingUsage();
+        log.audit('GOV [' + label + ']', rem + ' units remaining');
+        if (rem < GOVERNANCE_WARN) log.error('GOV_LOW [' + label + ']', rem + ' units remaining');
+    }
 
     /* ======================================
        ENTRY
@@ -48,16 +68,27 @@ define([
 
             if (!soId) throw 'Sales Order Internal ID required.';
 
+            checkGovernance('start');
+
             /* ========= CALL WMS ========= */
             var wmsLines = callWmsApi(soId);
+
+            /* ========= SQL 1: resolve ALL items (name + weight) in one query ========= */
+            var itemCache = resolveItemsBySuiteQL(wmsLines);   // { itemId: { name, weight } }
+
+            /* ========= SQL 2: resolve ALL bin names in one query ========= */
+            var binCache = resolveBinsBySuiteQL(wmsLines);     // { binName: internalId }
+
+            checkGovernance('after-cache');
 
             var pickMapByLine = buildPickMapByLine(wmsLines);
             var pickMapByItem = buildPickMapByItem(wmsLines);
 
-            var allTracking      = extractTrackingNumbers(wmsLines);
-            var existingTracking = getExistingTrackingNumbers(allTracking);
+            /* ========= SQL 3: existing tracking numbers via SuiteQL ========= */
+            var allTracking = extractTrackingNumbers(wmsLines);
+            var existingTracking = getExistingTrackingSQL(allTracking);
 
-            // FIX 2: filter only removes tracking rows, does not delete entries
+            /* FIX 2 */
             pickMapByLine = filterPickedTracking(pickMapByLine, existingTracking);
             pickMapByItem = filterPickedTracking(pickMapByItem, existingTracking);
 
@@ -67,36 +98,34 @@ define([
 
             /* ========= LOAD SO ========= */
             var salesOrderRecord = record.load({
-                type:      record.Type.SALES_ORDER,
-                id:        soId,
+                type: record.Type.SALES_ORDER,
+                id: soId,
                 isDynamic: true
             });
 
-            var orderStatus      = salesOrderRecord.getValue({ fieldId: 'status' });
-            var customer         = salesOrderRecord.getValue({ fieldId: 'entity' });
+            var orderStatus = salesOrderRecord.getValue({ fieldId: 'status' });
+            var customer = salesOrderRecord.getValue({ fieldId: 'entity' });
             var headerLocationId = salesOrderRecord.getValue({ fieldId: 'location' });
-            var singleIf         = salesOrderRecord.getValue({ fieldId: 'custbody_wms_so_single_if' });
+            var singleIf = salesOrderRecord.getValue({ fieldId: 'custbody_wms_so_single_if' });
 
-            if (orderStatus == 'Billed')            throw 'Sales Order is Billed. Cannot be processed.';
+            if (orderStatus == 'Billed') throw 'Sales Order is Billed. Cannot be processed.';
             if (customer == 476 || customer == 1807) throw 'Customer is Amazon. Cannot be processed.';
 
             /* ======================================================
                FIX 3 — SINGLE-IF GATE (runs after filtering)
-               Check (a): all WMS lines with qty > 0 must be picked.
-               Check (b): every SO item line must exist in pick maps.
             ====================================================== */
             if (singleIf) {
 
-                // (a) All positive-qty WMS lines must be picked
+                /* (a) All positive-qty WMS lines must be picked */
                 var notPicked = wmsLines.filter(function (line) {
                     return Number(line.quantity) > 0 && line.is_picked !== 'picked';
                 });
                 if (notPicked.length) {
                     throw 'Single IF requires ALL items to be picked. '
-                        + notPicked.length + ' line(s) not yet picked.';
+                    + notPicked.length + ' line(s) not yet picked.';
                 }
 
-                // (b) Every SO line must resolve in the pick maps with qty > 0
+                /* (b) Every SO line must resolve in the pick maps with qty > 0 */
                 var soLineCountCheck = salesOrderRecord.getLineCount({ sublistId: 'item' });
                 for (var g = 0; g < soLineCountCheck; g++) {
                     salesOrderRecord.selectLine({ sublistId: 'item', line: g });
@@ -104,10 +133,12 @@ define([
                     var soUniqueId = salesOrderRecord.getCurrentSublistValue({
                         sublistId: 'item', fieldId: 'custcol_wms_unique_id'
                     });
-                    var soItemIdChk   = salesOrderRecord.getCurrentSublistValue({
+                    var soItemIdChk = salesOrderRecord.getCurrentSublistValue({
                         sublistId: 'item', fieldId: 'item'
                     });
-                    var soItemNameChk = getItemNameById(soItemIdChk) || String(soItemIdChk);
+                    var soItemNameChk = (itemCache[soItemIdChk] && itemCache[soItemIdChk].name)
+                        || getItemNameById(soItemIdChk)
+                        || String(soItemIdChk);
 
                     var inPickMap =
                         (soUniqueId && pickMapByLine[soUniqueId] && pickMapByLine[soUniqueId].qty > 0) ||
@@ -115,8 +146,8 @@ define([
 
                     if (!inPickMap) {
                         throw 'Single IF: item ' + soItemNameChk
-                            + ' (unique_id: ' + soUniqueId + ') is not fully picked yet. '
-                            + 'Cannot create fulfillment until all lines are ready.';
+                        + ' (unique_id: ' + soUniqueId + ') is not fully picked yet. '
+                        + 'Cannot create fulfillment until all lines are ready.';
                     }
                 }
             }
@@ -129,56 +160,105 @@ define([
                 for (var i = 0; i < soLineCount; i++) {
                     salesOrderRecord.selectLine({ sublistId: 'item', line: i });
                     var soItemId = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'item' });
-                    var soLocId  = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'location' });
-                    var soQty    = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity' });
+                    var soLocId = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'location' });
+                    var soQty = salesOrderRecord.getCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity' });
 
                     if (soLocId !== headerLocationId) {
                         nonHeaderLocationItems.push({
-                            itemId:           soItemId,
-                            locationId:       soLocId,
+                            itemId: soItemId,
+                            locationId: soLocId,
                             headerLocationId: headerLocationId,
-                            quantity:         soQty
+                            quantity: soQty
                         });
                     }
                 }
             }
 
             /* ========= SINGLE-IF: INVENTORY TRANSFERS ========= */
+            /*
+             * BIN CHANGE: Transfer moves FROM the item's PICKED BIN (source location)
+             *             TO the header location's BULK/STAGE BIN.
+             * If picked bin has no inventory → auto-adjust picked bin first (via getInventoryByItemAndBin),
+             * then transfer to header bulk bin.
+             */
             nonHeaderLocationItems.forEach(function (item) {
+                // L74 lines are never transferred — leave untouched
                 if (L74_LOCS[Number(item.locationId)]) return;
 
-                var stageBinId       = getStageBinByLocation(item.locationId);
+                // Destination is ALWAYS the header location's bulk/stage bin
                 var headerStageBinId = getStageBinByLocation(item.headerLocationId);
-                if (!stageBinId || !headerStageBinId) return;
+                if (!headerStageBinId) {
+                    log.error('INV_TRANSFER_NO_HEADER_BIN',
+                        'No stage bin for header loc ' + item.headerLocationId + ', item ' + item.itemId);
+                    return;
+                }
 
+                // Source: find the picked bin for this item+location from wmsLines
+                var sourcePickedBinName = null;
+                wmsLines.forEach(function (line) {
+                    if (sourcePickedBinName) return; // already found
+                    if (String(line.item) === String(item.itemId) && line.is_picked === 'picked') {
+                        sourcePickedBinName = line.bin_number || line.binnumber || line.binNumber || null;
+                    }
+                });
+
+                // Resolve picked bin name → internal ID (use cache first, then fallback)
+                var sourcePickedBinId = null;
+                if (sourcePickedBinName) {
+                    sourcePickedBinId = (binCache[sourcePickedBinName] !== undefined)
+                        ? binCache[sourcePickedBinName]
+                        : getInternalBinId(sourcePickedBinName);
+                }
+
+                if (!sourcePickedBinId) {
+                    log.error('INV_TRANSFER_NO_PICKED_BIN',
+                        'No picked bin found for item ' + item.itemId + ' at loc ' + item.locationId
+                        + '. Cannot create transfer.');
+                    return;
+                }
+
+                log.audit('INV_TRANSFER_BINS', {
+                    itemId: item.itemId,
+                    fromBin: sourcePickedBinId + ' (' + sourcePickedBinName + ')',
+                    toBin: headerStageBinId,
+                    fromLoc: item.locationId,
+                    toLoc: item.headerLocationId
+                });
+
+                // Check/ensure inventory in picked bin (auto-adjusts into picked bin if missing)
                 var checkBinExists = getInventoryByItemAndBin(
-                    item.itemId, stageBinId, item.quantity, item.locationId
+                    item.itemId, sourcePickedBinId, item.quantity, item.locationId
                 );
+
                 if (checkBinExists) {
+                    // FROM picked bin (source loc) → TO header bulk/stage bin (header loc)
                     createInventoryTransfer(
                         item.itemId, item.quantity,
                         item.locationId, item.headerLocationId,
-                        stageBinId, headerStageBinId,
+                        sourcePickedBinId,  // FROM: picked bin
+                        headerStageBinId,   // TO:   header location's bulk/stage bin
                         soId
                     );
                 }
             });
 
+            checkGovernance('before-transform');
+
             /* ========= TRANSFORM SO -> ITEM FULFILLMENT ========= */
             var fulfillment = record.transform({
-                fromType:  record.Type.SALES_ORDER,
-                fromId:    soId,
-                toType:    record.Type.ITEM_FULFILLMENT,
+                fromType: record.Type.SALES_ORDER,
+                fromId: soId,
+                toType: record.Type.ITEM_FULFILLMENT,
                 isDynamic: true
             });
 
             fulfillment.setValue({ fieldId: 'shipstatus', value: 'C' });
 
-            var itemLineCount    = fulfillment.getLineCount({ sublistId: 'item' });
-            var hasFulfillLines  = false;
-            var packageIndexMap  = {};
+            var itemLineCount = fulfillment.getLineCount({ sublistId: 'item' });
+            var hasFulfillLines = false;
+            var packageIndexMap = {};
             var allTrackingArray = [];
-            var l74ErrorNotes    = [];
+            var l74ErrorNotes = [];
 
             /* ========= PROCESS EACH FULFILLMENT LINE ========= */
             for (var i = 0; i < itemLineCount; i++) {
@@ -197,62 +277,96 @@ define([
                 }
 
                 var itemIdInternal = fulfillment.getCurrentSublistValue({ sublistId: 'item', fieldId: 'item' });
-                var itemText       = getItemNameById(itemIdInternal) || String(itemIdInternal);
-                var remainingQty   = Number(fulfillment.getCurrentSublistValue({
+
+                /* SQL 1 cache — no per-line search */
+                var itemText = (itemCache[itemIdInternal] && itemCache[itemIdInternal].name)
+                    || getItemNameById(itemIdInternal)
+                    || String(itemIdInternal);
+                var itemWeight = (itemCache[itemIdInternal] && itemCache[itemIdInternal].weight) || 0;
+
+                var remainingQty = Number(fulfillment.getCurrentSublistValue({
                     sublistId: 'item', fieldId: 'quantityremaining'
                 })) || 0;
-                var rawLineLocId   = Number(fulfillment.getCurrentSublistValue({
+                var rawLineLocId = Number(fulfillment.getCurrentSublistValue({
                     sublistId: 'item', fieldId: 'location'
                 }));
                 var lineLocationId = singleIf ? Number(headerLocationId) : rawLineLocId;
-                var isL74          = !!L74_LOCS[lineLocationId];
+                var isL74 = !!L74_LOCS[lineLocationId];
 
-                // FIX 1: exact unique_id match — no normalization
+                /* FIX 1: exact unique_id — no normalization */
                 var uniqueId = fulfillment.getCurrentSublistValue({
                     sublistId: 'item', fieldId: 'custcol_wms_unique_id'
                 });
 
-                var qtyToFulfill  = 0;
-                var trackingList  = [];
+                var qtyToFulfill = 0;
+                var trackingList = [];
                 var pickedBinName = null;
 
                 if (uniqueId && pickMapByLine[uniqueId] && pickMapByLine[uniqueId].qty > 0) {
-                    /* Primary: exact unique_id match */
-                    var ld        = pickMapByLine[uniqueId];
-                    qtyToFulfill  = Math.min(ld.qty, remainingQty);
-                    trackingList  = ld.tracking.slice(0, qtyToFulfill);
+
+                    var ld = pickMapByLine[uniqueId];
+                    qtyToFulfill = Math.min(ld.qty, remainingQty);
+                    trackingList = ld.tracking.slice(0, qtyToFulfill);
                     pickedBinName = ld.pickedBin;
-                    ld.qty       -= qtyToFulfill;
+                    ld.qty -= qtyToFulfill;
                     if (ld.qty <= 0) delete pickMapByLine[uniqueId];
 
                     /*
                      * SPLIT-LINE DRAIN
-                     * WMS splits one NS line into siblings keyed as:
-                     *   "708127381"    qty 2   (matches NS unique_id)
-                     *   "708127381-1"  qty 1   (no NS line — orphaned)
-                     *   "708127381-2"  qty 1   ...etc
-                     * After consuming the primary, keep draining siblings
-                     * (-1, -2, -3...) until remainingQty is satisfied.
+                     *
+                     * WMS generates siblings in TWO patterns:
+                     *
+                     * Pattern A — sequential numbers (original assumption):
+                     *   "709707101"   "709707101-1"   "709707101-2"   "709707101-3"
+                     *
+                     * Pattern B — nested -1 chains (this order):
+                     *   "709963759"   "709963759-1"   "709963759-1-1"   "709963759-1-1-1" ...
+                     *
+                     * Strategy: try BOTH patterns at each depth until remainingQty is satisfied.
+                     * Walk the -1 chain first (append "-1" to last consumed key),
+                     * then fall back to sequential increment off the original uniqueId.
+                     * This handles mixed orders correctly and any qty size (no hard cap beyond maxDepth=50).
                      */
-                    var sibIdx = 1;
-                    while (qtyToFulfill < remainingQty) {
-                        var sibKey = uniqueId + '-' + sibIdx;
-                        if (!pickMapByLine[sibKey] || pickMapByLine[sibKey].qty <= 0) break;
-                        var sib    = pickMapByLine[sibKey];
+                    var lastKey = uniqueId;   // tracks end of the -1 chain
+                    var sibIdx = 1;           // tracks sequential counter
+                    var maxDepth = 50;        // safety cap — prevents infinite loop
+                    var depth = 0;
+
+                    while (qtyToFulfill < remainingQty && depth < maxDepth) {
+                        depth++;
+
+                        /* Try Pattern B first: extend the -1 chain from lastKey */
+                        var chainKey = lastKey + '-1';
+                        /* Try Pattern A next: sequential off original uniqueId */
+                        var seqKey = uniqueId + '-' + sibIdx;
+
+                        var foundKey = null;
+                        if (pickMapByLine[chainKey] && pickMapByLine[chainKey].qty > 0) {
+                            foundKey = chainKey;
+                            lastKey = chainKey;   // advance chain pointer
+                        } else if (chainKey !== seqKey && pickMapByLine[seqKey] && pickMapByLine[seqKey].qty > 0) {
+                            foundKey = seqKey;
+                            lastKey = seqKey;     // advance chain pointer to seq key
+                        }
+
+                        if (!foundKey) break;      // neither pattern has more siblings
+
+                        var sib = pickMapByLine[foundKey];
                         var sibQty = Math.min(sib.qty, remainingQty - qtyToFulfill);
-                        trackingList  = trackingList.concat(sib.tracking.slice(0, sibQty));
+                        trackingList = trackingList.concat(sib.tracking.slice(0, sibQty));
                         if (!pickedBinName) pickedBinName = sib.pickedBin;
                         qtyToFulfill += sibQty;
-                        sib.qty      -= sibQty;
-                        if (sib.qty <= 0) delete pickMapByLine[sibKey];
-                        sibIdx++;
+                        sib.qty -= sibQty;
+                        if (sib.qty <= 0) delete pickMapByLine[foundKey];
+
+                        sibIdx++;   // always advance seq counter regardless of which pattern matched
                     }
 
-                    /* Also drain item-name fallback map for any residual qty */
+                    /* Drain item-name fallback for residual qty */
                     if (qtyToFulfill < remainingQty && pickMapByItem[itemText] && pickMapByItem[itemText].qty > 0) {
-                        var imdExtra  = pickMapByItem[itemText];
-                        var extraQty  = Math.min(imdExtra.qty, remainingQty - qtyToFulfill);
-                        trackingList  = trackingList.concat(imdExtra.tracking.splice(0, extraQty));
+                        var imdExtra = pickMapByItem[itemText];
+                        var extraQty = Math.min(imdExtra.qty, remainingQty - qtyToFulfill);
+                        trackingList = trackingList.concat(imdExtra.tracking.splice(0, extraQty));
                         if (!pickedBinName) pickedBinName = imdExtra.pickedBin;
                         qtyToFulfill += extraQty;
                         imdExtra.qty -= extraQty;
@@ -260,12 +374,12 @@ define([
                     }
 
                 } else if (pickMapByItem[itemText] && pickMapByItem[itemText].qty > 0) {
-                    /* Fallback: item name match (no unique_id on NS line) */
-                    var imd       = pickMapByItem[itemText];
-                    qtyToFulfill  = Math.min(imd.qty, remainingQty);
-                    trackingList  = imd.tracking.slice(0, qtyToFulfill);
+
+                    var imd = pickMapByItem[itemText];
+                    qtyToFulfill = Math.min(imd.qty, remainingQty);
+                    trackingList = imd.tracking.slice(0, qtyToFulfill);
                     pickedBinName = imd.pickedBin;
-                    imd.qty      -= qtyToFulfill;
+                    imd.qty -= qtyToFulfill;
                     if (imd.qty <= 0) delete pickMapByItem[itemText];
                 }
 
@@ -281,9 +395,19 @@ define([
                     continue;
                 }
 
+                /* =====================================================
+                   BIN RESOLUTION
+                   - L74:  use picked bin (with inventory check via SQL 5) — UNTOUCHED
+                   - Non-L74 (normal, same location): use picked bin directly.
+                             If inventory missing → auto-adjust into picked bin.
+                   - Non-L74 (cross-location / transferred): inventory was moved
+                             to header location's bulk/stage bin by the transfer above,
+                             so fulfill from that bulk bin.
+                   ===================================================== */
                 var effectiveBinId = null;
 
                 if (isL74) {
+                    /* ---- L74 LOGIC — COMPLETELY UNTOUCHED ---- */
 
                     if (!pickedBinName) {
                         var errA = 'L74 SKIP (no bin): item=' + itemText + ' loc=' + lineLocationId;
@@ -294,7 +418,11 @@ define([
                         continue;
                     }
 
-                    effectiveBinId = getInternalBinId(pickedBinName);
+                    /* SQL 2 cache — no per-line bin search */
+                    effectiveBinId = (binCache[pickedBinName] !== undefined)
+                        ? binCache[pickedBinName]
+                        : getInternalBinId(pickedBinName);
+
                     if (!effectiveBinId) {
                         var errB = 'L74 SKIP (bin resolve fail): item=' + itemText + ' bin=' + pickedBinName;
                         log.error('L74_BIN_RESOLVE', errB);
@@ -304,7 +432,8 @@ define([
                         continue;
                     }
 
-                    var l74hasStock = checkInventoryAvailableOnly(
+                    /* SQL 5: L74 inventory check via SuiteQL */
+                    var l74hasStock = checkInventoryAvailSQL(
                         itemIdInternal, effectiveBinId, qtyToFulfill, lineLocationId
                     );
                     if (!l74hasStock) {
@@ -320,27 +449,89 @@ define([
                     }
 
                 } else {
+                    /* ---- NON-L74 LOGIC (BIN CHANGE APPLIED HERE) ---- */
 
-                    var stageBinId = getStageBinByLocation(lineLocationId);
-                    var checkBinExists = getInventoryByItemAndBin(
-                        itemIdInternal, stageBinId, remainingQty, lineLocationId
-                    );
-                    if (!checkBinExists) {
-                        throw 'Inventory not found for item: ' + itemText + ' in bin: ' + stageBinId;
+                    /*
+                     * Determine if this line's item was cross-location transferred.
+                     * If yes → inventory now lives in the header location's bulk/stage bin.
+                     * If no  → inventory lives in the picked bin (possibly auto-adjusted).
+                     */
+                    var wasTransferred = nonHeaderLocationItems.some(function (ni) {
+                        return String(ni.itemId) === String(itemIdInternal);
+                    });
+
+                    if (wasTransferred) {
+                        /*
+                         * CROSS-LOCATION LINE:
+                         * Inventory was transferred to header location's bulk/stage bin.
+                         * Fulfill from that bulk bin.
+                         */
+                        var headerBulkBin = getStageBinByLocation(Number(headerLocationId));
+                        if (!headerBulkBin) {
+                            throw 'No bulk/stage bin configured for header location: ' + headerLocationId
+                            + ' (item: ' + itemText + ')';
+                        }
+
+                        log.audit('FULFILL_FROM_BULK_BIN (transferred line)', {
+                            item: itemText,
+                            bulkBin: headerBulkBin,
+                            headerLoc: headerLocationId
+                        });
+
+                        /* SQL 4: check/auto-adjust in bulk bin at header location */
+                        getInventoryByItemAndBin(
+                            itemIdInternal, headerBulkBin, qtyToFulfill, Number(headerLocationId)
+                        );
+                        effectiveBinId = headerBulkBin;
+
+                    } else {
+                        /*
+                         * SAME-LOCATION LINE (normal case):
+                         * Resolve picked bin → fulfill from it.
+                         * If inventory is missing, getInventoryByItemAndBin auto-adjusts
+                         * into the PICKED BIN (not bulk bin).
+                         */
+                        var resolvedPickedBinId = null;
+                        if (pickedBinName) {
+                            resolvedPickedBinId = (binCache[pickedBinName] !== undefined)
+                                ? binCache[pickedBinName]
+                                : getInternalBinId(pickedBinName);
+                        }
+
+                        if (!resolvedPickedBinId) {
+                            throw 'No picked bin found for item: ' + itemText
+                            + ' (uniqueId: ' + uniqueId + '). Cannot fulfill.';
+                        }
+
+                        log.audit('FULFILL_FROM_PICKED_BIN', {
+                            item: itemText,
+                            pickedBin: pickedBinName,
+                            resolvedBinId: resolvedPickedBinId,
+                            loc: lineLocationId
+                        });
+
+                        /* SQL 4: check/auto-adjust in PICKED BIN (not bulk bin) */
+                        getInventoryByItemAndBin(
+                            itemIdInternal, resolvedPickedBinId, qtyToFulfill, lineLocationId
+                        );
+                        effectiveBinId = resolvedPickedBinId;
                     }
-                    effectiveBinId = stageBinId;
                 }
 
                 hasFulfillLines = true;
-                var itemWeight  = getItemWeight(itemIdInternal);
 
                 fulfillment.setCurrentSublistValue({ sublistId: 'item', fieldId: 'itemreceive', value: true });
-                fulfillment.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity',    value: qtyToFulfill });
+                fulfillment.setCurrentSublistValue({ sublistId: 'item', fieldId: 'quantity', value: qtyToFulfill });
 
                 assignInventoryDetail(fulfillment, qtyToFulfill, effectiveBinId);
 
                 fulfillment.commitLine({ sublistId: 'item' });
 
+                /*
+                 * PACKAGE LINES — no hard cap on qty.
+                 * trackingList can have any number of entries (handles >140).
+                 * packageIndexMap deduplicates tracking numbers across all lines.
+                 */
                 trackingList.forEach(function (trackObj) {
                     var trackingNumber = trackObj.trackingNumber;
                     if (!trackingNumber) return;
@@ -360,8 +551,8 @@ define([
 
                     allTrackingArray.push({
                         trackingNumber: trackingNumber,
-                        SSCC:           trackObj.SSCC,
-                        itemName:       itemText
+                        SSCC: trackObj.SSCC,
+                        itemName: itemText
                     });
                 });
 
@@ -369,17 +560,24 @@ define([
 
             if (!hasFulfillLines) throw 'No lines qualified for fulfillment.';
 
+            checkGovernance('before-fulfillment-save');
+
             var fulfillmentId = fulfillment.save({
-                enableSourcing:        true,
+                enableSourcing: true,
                 ignoreMandatoryFields: true
             });
 
-            createCustomPackageContents(fulfillmentId, allTrackingArray);
+            checkGovernance('after-fulfillment-save');
+
+            /* OPT 3: pass customer — no second record.load */
+            createCustomPackageContents(fulfillmentId, allTrackingArray, customer);
+
+            checkGovernance('after-package-contents');
 
             if (l74ErrorNotes.length) {
                 record.submitFields({
-                    type:   record.Type.SALES_ORDER,
-                    id:     soId,
+                    type: record.Type.SALES_ORDER,
+                    id: soId,
                     values: {
                         custbody_jyswms_fufilment_error:
                             '[IF#' + fulfillmentId + '] ' + l74ErrorNotes.join(' | ')
@@ -388,15 +586,15 @@ define([
             }
 
             form.addField({
-                id:    'custpage_success',
-                type:  ui.FieldType.INLINEHTML,
+                id: 'custpage_success',
+                type: ui.FieldType.INLINEHTML,
                 label: ' '
             }).defaultValue =
                 '<h3 style="color:green">Fulfillment Created</h3>' +
                 '<p>ID: ' + fulfillmentId + '</p>' +
                 (l74ErrorNotes.length
                     ? '<p style="color:darkorange"><b>L74 Notes:</b><br>'
-                        + l74ErrorNotes.join('<br>') + '</p>'
+                    + l74ErrorNotes.join('<br>') + '</p>'
                     : '');
 
         } catch (e) {
@@ -404,13 +602,222 @@ define([
             log.error('Fulfillment Error', e);
 
             form.addField({
-                id:    'custpage_error',
-                type:  ui.FieldType.INLINEHTML,
+                id: 'custpage_error',
+                type: ui.FieldType.INLINEHTML,
                 label: ' '
             }).defaultValue = '<h3 style="color:red">Error</h3><p>' + e + '</p>';
         }
 
         context.response.writePage(form);
+    }
+
+    /* ======================================
+       SQL 1 — RESOLVE ITEMS VIA SUITEQL
+       Single query fetches name + weight for ALL unique items in wmsLines.
+       Returns cache keyed by both internalId AND itemName for flexible lookup.
+    ====================================== */
+    function resolveItemsBySuiteQL(wmsLines) {
+
+        var cache = {};
+        var itemNames = [];
+        var seen = {};
+
+        wmsLines.forEach(function (line) {
+            if (line.item && !seen[line.item]) {
+                seen[line.item] = true;
+                itemNames.push(line.item);
+            }
+        });
+
+        if (!itemNames.length) return cache;
+
+        /* Build quoted IN list: 'ITEM1','ITEM2',... */
+        var inList = itemNames.map(function (n) {
+            return "'" + n.replace(/'/g, "''") + "'";
+        }).join(',');
+
+        try {
+            var sql = "SELECT id, itemid, weight FROM item WHERE itemid IN (" + inList + ")";
+            var results = query.runSuiteQL({ query: sql }).asMappedResults();
+
+            results.forEach(function (row) {
+                var id = String(row.id);
+                var name = row.itemid;
+                var weight = Number(row.weight) || 0;
+                /* Index by both internal ID and item name */
+                cache[id] = { name: name, weight: weight };
+                cache[name] = { name: name, weight: weight, id: id };
+            });
+
+        } catch (e) {
+            log.error('resolveItemsBySuiteQL', e);
+        }
+
+        log.audit('SQL_ITEMS', 'Resolved ' + Object.keys(cache).length + ' entries for ' + itemNames.length + ' items');
+        return cache;
+    }
+
+    /* ======================================
+       SQL 2 — RESOLVE BIN NAMES VIA SUITEQL
+       Single query for all non-numeric bin names from wmsLines.
+       Returns { binName: internalId }
+    ====================================== */
+    function resolveBinsBySuiteQL(wmsLines) {
+
+        var cache = {};
+        var toSearch = [];
+        var seen = {};
+
+        wmsLines.forEach(function (line) {
+            var bin = line.bin_number || line.binnumber || line.binNumber || null;
+            if (!bin || seen[bin]) return;
+            seen[bin] = true;
+
+            var parsed = Number(bin);
+            if (!isNaN(parsed) && parsed > 0) {
+                /* Numeric bin name IS the internal ID */
+                cache[bin] = parsed;
+            } else {
+                toSearch.push(bin);
+            }
+        });
+
+        if (!toSearch.length) return cache;
+
+        var inList = toSearch.map(function (b) {
+            return "'" + b.replace(/'/g, "''") + "'";
+        }).join(',');
+
+        try {
+            var sql = "SELECT id, binnumber FROM bin WHERE binnumber IN (" + inList + ")";
+            var results = query.runSuiteQL({ query: sql }).asMappedResults();
+
+            results.forEach(function (row) {
+                cache[row.binnumber] = Number(row.id);
+            });
+
+        } catch (e) {
+            log.error('resolveBinsBySuiteQL', e);
+        }
+
+        log.audit('SQL_BINS', 'Resolved ' + Object.keys(cache).length + ' bin entries');
+        return cache;
+    }
+
+    /* ======================================
+       SQL 3 — EXISTING TRACKING NUMBERS VIA SUITEQL
+       Replaces batched OR-filter search with a single SQL IN query.
+       Handles any order size without governance concerns.
+    ====================================== */
+    function getExistingTrackingSQL(trackingNumbers) {
+
+        var existingTracking = {};
+
+        if (!trackingNumbers || !trackingNumbers.length) return existingTracking;
+
+        try {
+            /* Build IN list in chunks — SuiteQL handles large IN lists efficiently */
+            var CHUNK = 500;
+            for (var start = 0; start < trackingNumbers.length; start += CHUNK) {
+
+                var batch = trackingNumbers.slice(start, start + CHUNK);
+                var inList = batch.map(function (t) {
+                    return "'" + String(t).replace(/'/g, "''") + "'";
+                }).join(',');
+
+                /*
+                 * ItemFulfillmentPackage joins to ItemFulfillment.
+                 */
+                var sql =
+                    "SELECT ifp.trackingnumber " +
+                    "FROM ItemFulfillmentPackage ifp " +
+                    "INNER JOIN ItemFulfillment iff ON iff.id = ifp.itemfulfillment " +
+                    "WHERE ifp.trackingnumber IN (" + inList + ")";
+
+                var results = query.runSuiteQL({ query: sql }).asMappedResults();
+
+                results.forEach(function (row) {
+                    if (row.trackingnumber) existingTracking[String(row.trackingnumber)] = true;
+                });
+            }
+
+        } catch (e) {
+            log.error('getExistingTrackingSQL', e);
+        }
+
+        log.audit('SQL_TRACKING', 'Found ' + Object.keys(existingTracking).length + ' already-fulfilled tracking numbers');
+        return existingTracking;
+    }
+
+    /* ======================================
+       SQL 4 — INVENTORY CHECK + AUTO-ADJUST
+       BIN CHANGE: binId is now always the PICKED BIN for normal lines,
+       or the BULK/STAGE BIN for cross-location transferred lines.
+       The auto-adjustment always targets whichever binId is passed in.
+       Replaces runPaged().count + run().each() double execution
+       with a single SuiteQL COUNT query.
+    ====================================== */
+    function getInventoryByItemAndBin(itemId, binId, quantity, locationId) {
+
+        log.audit('INVENTORY_CHECK', {
+            itemId: itemId, binId: binId, quantity: quantity, locationId: locationId
+        });
+
+        var invExists = false;
+
+        try {
+            /*
+             * InventoryBalance view: item, binnumber (id), location, quantityonhand
+             * Note: binnumber column in InventoryBalance is the bin internal ID.
+             */
+            var sql =
+                "SELECT COUNT(*) AS cnt " +
+                "FROM InventoryBalance ib " +
+                "WHERE ib.item        = " + Number(itemId) + " " +
+                "AND   ib.binnumber   = " + Number(binId) + " " +
+                "AND   ib.location    = " + Number(locationId) + " " +
+                "AND   ib.quantityonhand > " + Number(quantity);
+
+            var results = query.runSuiteQL({ query: sql }).asMappedResults();
+            invExists = results.length > 0 && Number(results[0].cnt) > 0;
+
+        } catch (e) {
+            log.error('getInventoryByItemAndBin SQL', e);
+        }
+
+        if (!invExists) {
+            // Auto-adjust INTO whichever bin was passed (picked bin or bulk bin for transfers)
+            var adjustmentObj = {};
+            adjustmentObj[itemId] = quantity;
+            createPositiveAdjustment(adjustmentObj, locationId, binId);
+            invExists = true;
+        }
+
+        return invExists;
+    }
+
+    /* ======================================
+       SQL 5 — L74 INVENTORY CHECK VIA SUITEQL
+       UNTOUCHED — L74 logic is unchanged.
+    ====================================== */
+    function checkInventoryAvailSQL(itemId, binId, qty, locationId) {
+
+        try {
+            var sql =
+                "SELECT COUNT(*) AS cnt " +
+                "FROM InventoryBalance ib " +
+                "WHERE ib.item             = " + Number(itemId) + " " +
+                "AND   ib.binnumber        = " + Number(binId) + " " +
+                "AND   ib.location         = " + Number(locationId) + " " +
+                "AND   ib.quantityonhand  >= " + Number(qty);
+
+            var results = query.runSuiteQL({ query: sql }).asMappedResults();
+            return results.length > 0 && Number(results[0].cnt) > 0;
+
+        } catch (e) {
+            log.error('checkInventoryAvailSQL', e);
+            return false;
+        }
     }
 
     /* ======================================
@@ -424,7 +831,7 @@ define([
             var qty = Number(line.quantity) || 0;
             if (!qty) return;
 
-            var key = String(line.unique_id); // exact match
+            var key = String(line.unique_id);
 
             if (!map[key]) {
                 map[key] = { qty: 0, tracking: [], pickedBin: null };
@@ -439,7 +846,7 @@ define([
                 line.tracking_data.forEach(function (track) {
                     map[key].tracking.push({
                         trackingNumber: track.trackingNumber || '',
-                        SSCC:           track.SSCC           || ''
+                        SSCC: track.SSCC || ''
                     });
                 });
             }
@@ -470,7 +877,7 @@ define([
                 line.tracking_data.forEach(function (track) {
                     map[line.item].tracking.push({
                         trackingNumber: track.trackingNumber || '',
-                        SSCC:           track.SSCC           || ''
+                        SSCC: track.SSCC || ''
                     });
                 });
             }
@@ -481,21 +888,19 @@ define([
     /* ======================================
        FILTER ALREADY-FULFILLED TRACKING
        FIX 2: Only strips tracking rows. Reduces qty by removed count.
-       Does NOT reset qty to tracking.length.
-       Only deletes entry when qty truly hits zero.
     ====================================== */
     function filterPickedTracking(pickMap, existingTracking) {
         Object.keys(pickMap).forEach(function (key) {
-            var before   = pickMap[key].tracking.length;
+            var before = pickMap[key].tracking.length;
             var filtered = pickMap[key].tracking.filter(function (t) {
                 return !existingTracking[t.trackingNumber];
             });
-            var removed           = before - filtered.length;
+            var removed = before - filtered.length;
             pickMap[key].tracking = filtered;
-            pickMap[key].qty     -= removed; // reduce only by what was removed
+            pickMap[key].qty -= removed;
 
             if (pickMap[key].qty <= 0) {
-                delete pickMap[key]; // fully fulfilled
+                delete pickMap[key];
             }
         });
         return pickMap;
@@ -503,15 +908,18 @@ define([
 
     /* ======================================
        STAGE BIN BY LOCATION  (L41 & L60 only)
+       Used ONLY for:
+        - Inventory Transfer destination (header location's bulk bin)
+        - Cross-location fulfillment bin (after transfer)
     ====================================== */
     function getStageBinByLocation(locationId) {
-        if (Number(locationId) === 9)  return 4859;
+        if (Number(locationId) === 9) return 4859;
         if (Number(locationId) === 15) return 16692;
         return null;
     }
 
     /* ======================================
-       RESOLVE BIN NAME -> NS INTERNAL ID  (L74)
+       RESOLVE BIN NAME -> NS INTERNAL ID  (fallback for cache miss)
     ====================================== */
     function getInternalBinId(binName) {
         if (!binName) return null;
@@ -519,7 +927,7 @@ define([
         if (!isNaN(parsed) && parsed > 0) return parsed;
         try {
             var results = search.create({
-                type:    'bin',
+                type: 'bin',
                 filters: [['binnumber', 'is', String(binName)]],
                 columns: [search.createColumn({ name: 'internalid' })]
             }).run().getRange({ start: 0, end: 1 });
@@ -537,110 +945,43 @@ define([
     }
 
     /* ======================================
-       CHECK INVENTORY READ-ONLY  (L74 only)
-    ====================================== */
-    function checkInventoryAvailableOnly(itemId, binId, qty, locationId) {
-        var found = false;
-        try {
-            search.create({
-                type: 'inventorybalance',
-                filters: [
-                    ['item',     'anyof',                itemId],
-                    'AND',
-                    ['binnumber','anyof',                binId],
-                    'AND',
-                    ['location', 'anyof',                locationId],
-                    'AND',
-                    ['onhand',   'greaterthanorequalto', qty]
-                ],
-                columns: ['onhand']
-            }).run().each(function () { found = true; return false; });
-        } catch (e) {
-            log.error('checkInventoryAvailableOnly', e);
-        }
-        return found;
-    }
-
-    /* ======================================
-       CHECK INVENTORY + AUTO-ADJUST  (non-L74)
-    ====================================== */
-    function getInventoryByItemAndBin(itemId, binId, quantity, locationId) {
-        log.error('Getting Inventory by Item and Bin', {
-            itemId: itemId, binId: binId, quantity: quantity, locationId: locationId
-        });
-
-        var inventorybalanceSearchObj = search.create({
-            type: 'inventorybalance',
-            filters: [
-                ['item',     'anyof',      itemId],
-                'AND',
-                ['binnumber','anyof',       binId],
-                'AND',
-                ['onhand',   'greaterthan', quantity]
-            ],
-            columns: [
-                search.createColumn({ name: 'onhand',     label: 'On Hand' }),
-                search.createColumn({ name: 'available',  label: 'Available' }),
-                search.createColumn({ name: 'binnumber',  label: 'Bin Number' }),
-                search.createColumn({ name: 'location',   label: 'Location' }),
-                search.createColumn({ name: 'internalid', join: 'binNumber', label: 'Internal ID' })
-            ]
-        });
-
-        var invExists         = false;
-        var searchResultCount = inventorybalanceSearchObj.runPaged().count;
-        log.debug('inventorybalanceSearchObj result count', searchResultCount);
-
-        inventorybalanceSearchObj.run().each(function (result) {
-            invExists = true;
-            return true;
-        });
-
-        if (!invExists) {
-            var adjustmentObj    = {};
-            adjustmentObj[itemId] = quantity;
-            createPositiveAdjustment(adjustmentObj, locationId, binId);
-            invExists = true;
-        }
-
-        return invExists;
-    }
-
-    /* ======================================
        INVENTORY TRANSFER
+       BIN CHANGE: fromBin is now always the picked bin (passed in from caller).
+                   toBin is always the header location's bulk/stage bin.
     ====================================== */
     function createInventoryTransfer(itemId, quantity, fromLocation, toLocation, fromBin, toBin, soId) {
         try {
-            log.error('Creating Inventory Transfer', {
+            log.audit('CREATING_INVENTORY_TRANSFER', {
                 itemId: itemId, quantity: quantity,
                 fromLocation: fromLocation, toLocation: toLocation,
-                fromBin: fromBin, toBin: toBin, soId: soId
+                fromBin: fromBin + ' (picked bin)', toBin: toBin + ' (header bulk bin)',
+                soId: soId
             });
 
-            var invTransferRec = record.create({
-                type: record.Type.INVENTORY_TRANSFER, isDynamic: true
-            });
-            invTransferRec.setValue({ fieldId: 'location',         value: fromLocation });
+            var invTransferRec = record.create({ type: record.Type.INVENTORY_TRANSFER, isDynamic: true });
+            invTransferRec.setValue({ fieldId: 'location', value: fromLocation });
             invTransferRec.setValue({ fieldId: 'transferlocation', value: toLocation });
-            invTransferRec.setValue({ fieldId: 'memo',
-                value: 'Inventory Transfer for Fulfillment - SO: ' + soId });
+            invTransferRec.setValue({
+                fieldId: 'memo',
+                value: 'Inventory Transfer for Fulfillment - SO: ' + soId
+            });
 
             invTransferRec.selectNewLine({ sublistId: 'inventory' });
-            invTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item',        value: itemId });
+            invTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
             invTransferRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'adjustqtyby', value: quantity });
 
             var invDetail = invTransferRec.getCurrentSublistSubrecord({
                 sublistId: 'inventory', fieldId: 'inventorydetail'
             });
             invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
-            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber',   value: fromBin });
+            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: fromBin });
             invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'tobinnumber', value: toBin });
-            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity',    value: quantity });
+            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: quantity });
             invDetail.commitLine({ sublistId: 'inventoryassignment' });
             invTransferRec.commitLine({ sublistId: 'inventory' });
 
             var transferId = invTransferRec.save({ enableSourcing: true, ignoreMandatoryFields: true });
-            log.debug('Inventory Transfer Created', transferId);
+            log.audit('INVENTORY_TRANSFER_CREATED', transferId);
             return transferId;
         } catch (e) {
             log.error('Inventory Transfer Error', e);
@@ -648,27 +989,26 @@ define([
     }
 
     /* ======================================
-       POSITIVE INVENTORY ADJUSTMENT  (non-L74 only)
+       POSITIVE INVENTORY ADJUSTMENT
+       BIN CHANGE: binId passed in is now the PICKED BIN for normal lines.
+                   For cross-location transferred lines it is the bulk bin.
+                   No changes needed here — it already uses whatever binId is passed.
     ====================================== */
     function createPositiveAdjustment(adjustmentObj, locationId, binId) {
         try {
-            var adjRec = record.create({
-                type: record.Type.INVENTORY_ADJUSTMENT, isDynamic: true
-            });
-            adjRec.setValue({ fieldId: 'subsidiary',  value: 1 });
-            adjRec.setValue({ fieldId: 'memo',        value: 'Inventory Adj for Fulfillment' });
-            adjRec.setValue({ fieldId: 'account',     value: 464 });
+            var adjRec = record.create({ type: record.Type.INVENTORY_ADJUSTMENT, isDynamic: true });
+            adjRec.setValue({ fieldId: 'subsidiary', value: 1 });
+            adjRec.setValue({ fieldId: 'memo', value: 'Inventory Adj for Fulfillment' });
+            adjRec.setValue({ fieldId: 'account', value: 464 });
             adjRec.setValue({ fieldId: 'adjlocation', value: locationId });
 
-            log.debug('Adjustment Object', adjustmentObj);
-            log.debug('Location ID', locationId);
-            log.debug('Bin ID', binId);
+            log.audit('POSITIVE_ADJUSTMENT', { adjustmentObj: adjustmentObj, locationId: locationId, binId: binId });
 
             for (var itemId in adjustmentObj) {
                 var qty = adjustmentObj[itemId];
                 adjRec.selectNewLine({ sublistId: 'inventory' });
-                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item',        value: itemId });
-                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'location',    value: locationId });
+                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'item', value: itemId });
+                adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'location', value: locationId });
                 adjRec.setCurrentSublistValue({ sublistId: 'inventory', fieldId: 'adjustqtyby', value: qty });
 
                 var inventoryDetail = adjRec.getCurrentSublistSubrecord({
@@ -676,13 +1016,13 @@ define([
                 });
                 inventoryDetail.selectNewLine({ sublistId: 'inventoryassignment' });
                 inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: binId });
-                inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity',  value: qty });
+                inventoryDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: qty });
                 inventoryDetail.commitLine({ sublistId: 'inventoryassignment' });
                 adjRec.commitLine({ sublistId: 'inventory' });
             }
 
             var recId = adjRec.save({ enableSourcing: true, ignoreMandatoryFields: true });
-            log.debug('Inventory Adjustment Created', recId);
+            log.audit('POSITIVE_ADJUSTMENT_CREATED', recId);
             return recId;
         } catch (e) {
             log.error('Error Creating Inventory Adjustment', e);
@@ -691,11 +1031,13 @@ define([
 
     /* ======================================
        ASSIGN INVENTORY DETAIL ON FULFILLMENT LINE
+       effectiveBinId is now the picked bin (normal lines) or bulk bin (transferred lines).
+       No changes needed here.
     ====================================== */
     function assignInventoryDetail(fulfillment, qty, stageBinId) {
         if (!stageBinId) return;
         try {
-            var invDetail       = fulfillment.getCurrentSublistSubrecord({
+            var invDetail = fulfillment.getCurrentSublistSubrecord({
                 sublistId: 'item', fieldId: 'inventorydetail'
             });
             var assignmentCount = invDetail.getLineCount({ sublistId: 'inventoryassignment' });
@@ -704,7 +1046,7 @@ define([
             }
             invDetail.selectNewLine({ sublistId: 'inventoryassignment' });
             invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'binnumber', value: stageBinId });
-            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity',  value: qty });
+            invDetail.setCurrentSublistValue({ sublistId: 'inventoryassignment', fieldId: 'quantity', value: qty });
             invDetail.commitLine({ sublistId: 'inventoryassignment' });
         } catch (e) {
             log.error('Inventory Detail Error', e);
@@ -713,27 +1055,41 @@ define([
     }
 
     /* ======================================
-       CREATE CUSTOM PACKAGE CONTENT
+       OPT 1 — CREATE CUSTOM PACKAGE CONTENTS
+       isDynamic:false + direct setSublistValue (no select/commit per row).
+       customerId passed in — no second record.load.
+       seenTracking dedup logic unchanged.
+       HANDLES >140 QTY: no hard cap — processes all entries in trackingArray.
     ====================================== */
-    function createCustomPackageContents(fulfillmentId, trackingArray) {
+    function createCustomPackageContents(fulfillmentId, trackingArray, customerId) {
         try {
-            var fulfillmentRec = record.load({
-                type: record.Type.ITEM_FULFILLMENT, id: fulfillmentId, isDynamic: true
-            });
 
-            var customerId      = fulfillmentRec.getValue({ fieldId: 'entity' });
             var LOWES_CUSTOMERS = [1952, 639];
             var isLowesCustomer = LOWES_CUSTOMERS.indexOf(Number(customerId)) !== -1;
-            var sublistId       = 'recmachcustrecord_hj_packagecontents_sublist';
+            var sublistId = 'recmachcustrecord_hj_packagecontents_sublist';
 
+            /* Non-dynamic: bulk write without select/commit overhead */
+            var fulfillmentRec = record.load({
+                type: record.Type.ITEM_FULFILLMENT,
+                id: fulfillmentId,
+                isDynamic: false
+            });
+
+            /* Clear existing lines from end to avoid index shifting */
             var existingCount = fulfillmentRec.getLineCount({ sublistId: sublistId });
-            for (var i = existingCount - 1; i >= 0; i--) {
-                fulfillmentRec.removeLine({ sublistId: sublistId, line: i, ignoreRecalc: true });
+            for (var d = existingCount - 1; d >= 0; d--) {
+                fulfillmentRec.removeLine({ sublistId: sublistId, line: d, ignoreRecalc: true });
             }
 
             var packageBoxNumber = 0;
-            var seenTracking     = {};
+            var seenTracking = {};
+            var lineIdx = 0;
 
+            /*
+             * HANDLES >140 QTY:
+             * No slice/cap here — iterates ALL entries in trackingArray.
+             * Each unique tracking number gets its own package content line.
+             */
             trackingArray.forEach(function (line) {
                 if (!line.trackingNumber) return;
                 if (seenTracking[line.trackingNumber]) return;
@@ -741,37 +1097,23 @@ define([
                 seenTracking[line.trackingNumber] = true;
                 packageBoxNumber++;
 
-                fulfillmentRec.selectNewLine({ sublistId: sublistId });
-                fulfillmentRec.setCurrentSublistValue({
-                    sublistId: sublistId, fieldId: 'custrecordhj_pkgbox', value: packageBoxNumber
-                });
-                fulfillmentRec.setCurrentSublistValue({
-                    sublistId: sublistId, fieldId: 'custrecordhj_pkg_trackingnumber', value: line.trackingNumber
-                });
+                fulfillmentRec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_pkgbox', line: lineIdx, value: packageBoxNumber });
+                fulfillmentRec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_pkg_trackingnumber', line: lineIdx, value: line.trackingNumber });
+                fulfillmentRec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_pkg_desc', line: lineIdx, value: line.itemName + '/1' });
+                fulfillmentRec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecord_jyswms_createdfrom', line: lineIdx, value: true });
+                fulfillmentRec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecord_jyswms_item_not_populated', line: lineIdx, value: true });
+                fulfillmentRec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecord_jyswms_fulfillment_link', line: lineIdx, value: true });
 
                 if (line.SSCC || isLowesCustomer) {
-                    fulfillmentRec.setCurrentSublistValue({
-                        sublistId: sublistId, fieldId: 'custrecordhj_ucc', value: line.SSCC || ''
-                    });
+                    fulfillmentRec.setSublistValue({ sublistId: sublistId, fieldId: 'custrecordhj_ucc', line: lineIdx, value: line.SSCC || '' });
                 }
 
-                fulfillmentRec.setCurrentSublistValue({
-                    sublistId: sublistId, fieldId: 'custrecordhj_pkg_desc', value: line.itemName + '/1'
-                });
-                fulfillmentRec.setCurrentSublistValue({
-                    sublistId: sublistId, fieldId: 'custrecord_jyswms_createdfrom', value: true
-                });
-                fulfillmentRec.setCurrentSublistValue({
-                    sublistId: sublistId, fieldId: 'custrecord_jyswms_item_not_populated', value: true
-                });
-                fulfillmentRec.setCurrentSublistValue({
-                    sublistId: sublistId, fieldId: 'custrecord_jyswms_fulfillment_link', value: true
-                });
-
-                fulfillmentRec.commitLine({ sublistId: sublistId });
+                lineIdx++;
             });
 
             fulfillmentRec.save({ enableSourcing: true, ignoreMandatoryFields: true });
+            log.audit('PACKAGE_CONTENTS_SAVED', packageBoxNumber + ' records written for fulfillment ' + fulfillmentId);
+
         } catch (e) {
             log.error('Custom Package Content Error', e);
         }
@@ -781,19 +1123,20 @@ define([
        WMS API
     ====================================== */
     function callWmsApi(soId) {
-        var token    = tokenModule.generateToken();
+        var token = tokenModule.generateToken();
         var response = https.get({
             url: 'https://api.jyswms.com/dropship-sales-order-status-with-bins?sales_order_id=' + soId,
+            // url: 'https://jyswms-pragva.up.railway.app/dropship-sales-order-status-with-bins?sales_order_id=' + soId,
             headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
         });
         if (response.code !== 200) throw 'WMS API returned ' + response.code;
-        var body        = JSON.parse(response.body || '{}');
+        var body = JSON.parse(response.body || '{}');
         var sourceArray = (body.completed && body.completed.length) ? body.completed : body.notcompleted;
         return sourceArray[0].data || [];
     }
 
     /* ======================================
-       HELPERS
+       HELPERS — kept as fallback
     ====================================== */
     function getItemWeight(itemId) {
         try {
@@ -830,40 +1173,6 @@ define([
         } catch (error) {
             log.error('Error Extracting Tracking Numbers', error);
         }
-    }
-
-    function getExistingTrackingNumbers(trackingNumbers) {
-        var existingTracking = {};
-        try {
-            if (!trackingNumbers || !trackingNumbers.length) return existingTracking;
-
-            var filters = [
-                ['type',     'anyof', 'ItemShip'],
-                'AND',
-                ['mainline', 'is',    'T'],
-                'AND'
-            ];
-            var trackingFilter = [];
-            trackingNumbers.forEach(function (num, index) {
-                if (index > 0) trackingFilter.push('OR');
-                trackingFilter.push(['shipmentpackage.trackingnumber', 'is', num]);
-            });
-            filters = filters.concat(trackingFilter);
-
-            var fulfillmentSearch = search.create({
-                type:    'itemfulfillment',
-                filters: filters,
-                columns: [search.createColumn({ name: 'trackingnumber', join: 'shipmentpackage' })]
-            });
-            fulfillmentSearch.run().each(function (result) {
-                var tracking = result.getValue({ name: 'trackingnumber', join: 'shipmentpackage' });
-                if (tracking) existingTracking[String(tracking)] = true;
-                return true;
-            });
-        } catch (e) {
-            log.error('Error Fetching Existing Tracking Numbers', e);
-        }
-        return existingTracking;
     }
 
     function buildForm(context) {

@@ -12,10 +12,9 @@
  *        - custentity_jyswms_auto_loc_change   (auto location change flag)
  *      Both must be TRUE — if either is false/missing, exit immediately.
  *
- *   2. Check order-level guard flags:
- *        - custbody_bill_sender_order_location_up  (this script's own flag)
- *        - custbody_jyswms_loc_updated             (Script 2's flag)
- *      If either is TRUE, exit — prevents re-triggering on subsequent edits.
+ *   2. Check order-level guard flag:
+ *        - custbody_bill_sender_order_location_up
+ *      If already TRUE, exit — prevents re-triggering on subsequent edits.
  *
  *   3. Resolve the nearest warehouse from the shipping state (falling back
  *      to billing state) using the STATE → WH map from closest_WH.csv:
@@ -23,29 +22,28 @@
  *        L60 → Hardee      (NetSuite location ID: 15)
  *        L74 → Location 74 (NetSuite location ID: 23)
  *
- *   4. Update the SO header location AND every line location to the
- *      nearest warehouse — NO qty check, NO inventory check.
+ *   4. For each InvtPart line — check available inventory at the target
+ *      (nearest) warehouse. Only move the line if inventory is available
+ *      there. Lines with no stock at the target WH are left as-is.
+ *      No fallback to 2nd/3rd warehouse — nearest or nothing.
  *
- *   5. Set custbody_bill_sender_order_location_up = true so this never
- *      re-fires on future edits of the same order.
- *
- *   6. After saving, call /update-dropship-lines with the SO ID
- *      and all item IDs — mirrors the Script 2 API pattern.
- *      Fires always (even if all lines were already at the correct location).
+ *   5. If at least one line was moved, update the SO header location to
+ *      match and set custbody_bill_sender_order_location_up = true so
+ *      this never re-fires on future edits of the same order.
+ *      If no lines were moved, the guard flag is still set so the script
+ *      does not re-evaluate on every subsequent edit.
  *
  * RUNS ON: CREATE, EDIT
  * ALLOWED STATUSES: Pending Approval, Pending Fulfillment only.
- * DATE GATE: Only processes orders with trandate >= 2026-04-30.
+ * DATE GATE: Only processes orders with trandate >= 2026-04-30 (today).
  *            Older/existing orders are ignored.
+ * NO external API calls are made in this script.
  */
 define([
     'N/record',
     'N/search',
-    'N/log',
-    'N/https',
-    './Orders/orderUtils',
-    './JYSWMS_generateToken_API'
-], (record, search, log, https, autoLocUtil, tokenModule) => {
+    'N/log'
+], (record, search, log) => {
 
     // =========================================================
     // CONSTANTS — NetSuite Location Internal IDs
@@ -54,12 +52,14 @@ define([
     const LOC_HARDEE     = '15';   // L60 — South (FL)
     const LOC_74         = '23';   // L74 — West
 
+    // Warehouse code → NetSuite location ID
     const WH_CODE_TO_LOC = {
         L41: LOC_FLEMINGTON,
         L60: LOC_HARDEE,
         L74: LOC_74
     };
 
+    // NetSuite location ID → warehouse label (for logging only)
     const LOC_LABEL = {
         [LOC_FLEMINGTON]: 'L41 - Flemington',
         [LOC_HARDEE]:     'L60 - Hardee',
@@ -68,7 +68,8 @@ define([
 
     // =========================================================
     // STATE → NEAREST WAREHOUSE
-    // Source: closest_WH.csv (primary WH only)
+    // Source: closest_WH.csv (primary WH only — no fallback needed,
+    // this flow does NOT check inventory)
     // =========================================================
     const STATE_TO_WH = {
         // L41 — Flemington (East)
@@ -94,13 +95,15 @@ define([
 
     // =========================================================
     // ALLOWED ORDER STATUSES
+    // Only Pending Approval and Pending Fulfillment are processed.
     // =========================================================
-    const ALLOWED_STATUSES = ['Pending Approval'];  //, 'Pending Fulfillment'
+    const ALLOWED_STATUSES = ['Pending Approval'];   //, 'Pending Fulfillment'
 
     // =========================================================
-    // DATE GATE — only orders on or after May 1, 2026
+    // DATE GATE — only orders on or after April 30, 2026
+    // Month is 0-indexed: 3 = April
     // =========================================================
-   const GATE_DATE = new Date(2026, 4, 1);
+    const GATE_DATE = new Date(2026, 4, 04);
 
     /**
      * Resolves the nearest warehouse NetSuite location ID for a given state.
@@ -114,52 +117,14 @@ define([
     };
 
     // =========================================================
-    // sendData — mirrors Script 2's sendData() exactly.
-    // Calls /update-dropship-lines with Bearer token auth.
-    // payload shape: { salesOrderHeaderId, salesOrderItemId[] }
-    // =========================================================
-    const sendData = (payload) => {
-
-        log.error('BILL SENDER LOC | SEND DATA - START', JSON.stringify(payload));
-
-        const token = tokenModule.generateToken();
-
-        if (!token) {
-            log.error('BILL SENDER LOC | SEND DATA - Token Failed', 'Token generation failed');
-            return;
-        }
-
-        try {
-            const response = https.post({
-                url: 'https://api.jyswms.com/update-dropship-lines?closed=false',
-                headers: {
-                    'Authorization': 'Bearer ' + token,
-                    'Content-Type':  'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            log.error('BILL SENDER LOC | SEND DATA - RESPONSE', {
-                code: response.code,
-                body: response.body
-            });
-
-            return {
-                success:  response.code === 200,
-                response: response.body || ''
-            };
-
-        } catch (e) {
-            log.error('BILL SENDER LOC | SEND DATA - ERROR', e);
-            return { success: false, error: e.message };
-        }
-    };
-
-    // =========================================================
     // AFTER SUBMIT
+    // Using afterSubmit so we can load + save the full record
+    // cleanly, and it fires on both CREATE and EDIT including
+    // Pending Approval status orders.
     // =========================================================
     const afterSubmit = (context) => {
 
+        // Fire on CREATE and EDIT only
         if (![
             context.UserEventType.CREATE,
             context.UserEventType.EDIT
@@ -171,6 +136,9 @@ define([
 
             const newRec = context.newRecord;
             const soId   = newRec.id;
+
+            // newRec.type can return null on CREATE in some NetSuite versions,
+            // so we hardcode the type and just validate the record ID exists.
             const soType = record.Type.SALES_ORDER;
 
             if (!soId) {
@@ -178,17 +146,10 @@ define([
                 return;
             }
 
-            // ---- Guard: skip if already processed by either script ----
-            const alreadyUpdated    = newRec.getValue('custbody_bill_sender_order_location_up');
-            const locAlreadyUpdated = newRec.getValue('custbody_jyswms_loc_updated');
-
-            if (alreadyUpdated || locAlreadyUpdated) {
-                log.debug('BILL SENDER LOC | EXIT', {
-                    soId,
-                    alreadyUpdated,
-                    locAlreadyUpdated,
-                    reason: 'Order already processed by Bill Sender or Auto Location script — skipping.'
-                });
+            // ---- Guard: skip if already processed ----
+            const alreadyUpdated = newRec.getValue('custbody_bill_sender_order_location_up');
+            if (alreadyUpdated) {
+                log.debug('BILL SENDER LOC | EXIT', 'Order ' + soId + ' already processed — skipping.');
                 return;
             }
 
@@ -210,8 +171,8 @@ define([
             if (!tranDate || tranDate < GATE_DATE) {
                 log.debug('BILL SENDER LOC | EXIT', {
                     soId,
-                    tranDate: tranDateRaw,
-                    reason: 'Order date is before gate date (2026-04-30) — skipping.'
+                    tranDate : tranDateRaw,
+                    reason   : 'Order date is before gate date (2026-04-30) — skipping.'
                 });
                 return;
             }
@@ -225,18 +186,17 @@ define([
 
             // ---- Check BOTH customer-level flags ----
             const customerFields = search.lookupFields({
-                type:    search.Type.CUSTOMER,
-                id:      customerId,
+                type: search.Type.CUSTOMER,
+                id:   customerId,
                 columns: [
                     'custentity_bill_sender_customer',
-                    'custentity_jyswms_auto_loc_change',
-                    'custentity_jyswms_auto_routing'
+                    'custentity_jyswms_auto_loc_change'
                 ]
             });
 
             const isBillSender = (
-                customerFields.custentity_bill_sender_customer   === true ||
-                customerFields.custentity_bill_sender_customer   === 'T'
+                customerFields.custentity_bill_sender_customer === true ||
+                customerFields.custentity_bill_sender_customer === 'T'
             );
 
             const isAutoLocEnabled = (
@@ -244,139 +204,165 @@ define([
                 customerFields.custentity_jyswms_auto_loc_change === 'T'
             );
 
-            const isAutoRoutingEnabled = (
-                customerFields.custentity_jyswms_auto_routing    === true ||
-                customerFields.custentity_jyswms_auto_routing    === 'T'
-            );
-
-            if (!isAutoLocEnabled || (!isBillSender && !isAutoRoutingEnabled)) {
+            if (!isBillSender || !isAutoLocEnabled) {
                 log.debug('BILL SENDER LOC | EXIT', {
                     soId,
                     isBillSender,
                     isAutoLocEnabled,
-                    isAutoRoutingEnabled,
-                    reason: 'Auto location flag is false, or neither bill sender nor auto routing flag is true — no location update.'
+                    reason: 'One or both customer flags are false — no location update.'
                 });
                 return;
             }
 
             // ---- Resolve nearest warehouse from shipping state ----
-            const shipState     = newRec.getValue('shipstate') || '';
-            const billState     = newRec.getValue('billstate') || '';
+            // Prefer ship-to state; fall back to bill-to state
+            const shipState   = newRec.getValue('shipstate')  || '';
+            const billState   = newRec.getValue('billstate')  || '';
             const resolvedState = shipState || billState;
-            const targetLocId   = getNearestLocation(resolvedState);
+
+            const targetLocId = getNearestLocation(resolvedState);
 
             log.error('BILL SENDER LOC | RESOLVED', {
                 soId,
-                resolvedState: resolvedState || '(blank — using default)',
+                resolvedState : resolvedState || '(blank — using default)',
                 targetLocId,
-                targetLabel:   LOC_LABEL[targetLocId]
+                targetLabel   : LOC_LABEL[targetLocId]
             });
 
-            // ---- Load SO and update header + all lines ----
+            // ---- Load SO ----
             const so = record.load({
                 type:      soType,
                 id:        soId,
                 isDynamic: false
             });
 
-            const currentHeaderLoc = String(so.getValue('location') || '');
-
-            so.setValue({
-                fieldId: 'location',
-                value:   targetLocId
-            });
-
-            log.error('BILL SENDER LOC | HEADER UPDATED', {
-                soId,
-                from: LOC_LABEL[currentHeaderLoc] || currentHeaderLoc,
-                to:   LOC_LABEL[targetLocId]
-            });
-
             const lineCount = so.getLineCount({ sublistId: 'item' });
+            if (!lineCount) return;
 
-            // Collect all item IDs for the API payload
-            const allItemIds = new Set();
+            // ---- Collect all InvtPart item IDs for inventory check ----
+            const itemSet = new Set();
 
             for (let i = 0; i < lineCount; i++) {
+                const itemType = so.getSublistValue({ sublistId: 'item', fieldId: 'itemtype', line: i });
+                if (itemType !== 'InvtPart') continue;
+                const itemId = String(so.getSublistValue({ sublistId: 'item', fieldId: 'item', line: i }) || '');
+                if (itemId) itemSet.add(itemId);
+            }
 
-                // Capture item ID regardless of whether location changes
-                const itemId = String(
-                    so.getSublistValue({ sublistId: 'item', fieldId: 'item', line: i }) || ''
-                );
-                if (itemId) allItemIds.add(itemId);
+            // ---- Build inventory map: { itemId: availableQty } at target location only ----
+            // Only checks the single nearest WH — no fallback.
+            // Uses OR on the exclude flag so bins with null field are not dropped.
+            const inventoryAtTarget = {};  // { itemId: totalAvailable }
 
-                const currentLineLoc = String(
-                    so.getSublistValue({
-                        sublistId: 'item',
-                        fieldId:   'location',
-                        line:      i
-                    }) || ''
-                );
-
-                // Only update if the line location differs from target
-                if (currentLineLoc === targetLocId) continue;
-
-                so.setSublistValue({
-                    sublistId: 'item',
-                    fieldId:   'location',
-                    line:      i,
-                    value:     targetLocId
-                });
-
-                log.audit('BILL SENDER LOC | LINE ' + i + ' UPDATED', {
-                    from: LOC_LABEL[currentLineLoc] || currentLineLoc,
-                    to:   LOC_LABEL[targetLocId]
+            if (itemSet.size) {
+                search.create({
+                    type: 'inventorybalance',
+                    filters: [
+                        ['item',     'anyof',       [...itemSet]],
+                        'AND',
+                        ['location', 'anyof',       [targetLocId]],
+                        'AND',
+                        ['available','greaterthan', '0'],
+                        'AND',
+                        [
+                            ['binnumber.custrecord_jyswms_exclude_from_inventory', 'is',      'F'],
+                            'OR',
+                            ['binnumber.custrecord_jyswms_exclude_from_inventory', 'isempty', '']
+                        ],
+                        'AND',
+                        ['binnumber.inactive',  'is',        'F'],
+                        'AND',
+                        ['binnumber.binnumber', 'isnotempty', '']
+                    ],
+                    columns: ['item', 'location', 'available']
+                }).run().each(result => {
+                    const itemId = String(result.getValue('item') || '');
+                    const qty    = parseFloat(result.getValue('available')) || 0;
+                    if (!itemId) return true;
+                    inventoryAtTarget[itemId] = (inventoryAtTarget[itemId] || 0) + qty;
+                    return true;
                 });
             }
 
-            // ---- Set guard flag so this never re-fires ----
-            so.setValue({
-                fieldId: 'custbody_bill_sender_order_location_up',
-                value:   true
+            log.error('BILL SENDER LOC | INVENTORY AT TARGET', {
+                soId,
+                targetLocId,
+                targetLabel: LOC_LABEL[targetLocId],
+                inventoryAtTarget
             });
+
+            // ---- Per-line: only move if inventory exists at target WH ----
+            const currentHeaderLoc = String(so.getValue('location') || '');
+            let anyLineUpdated     = false;
+
+            for (let i = 0; i < lineCount; i++) {
+
+                const itemType = so.getSublistValue({ sublistId: 'item', fieldId: 'itemtype', line: i });
+                const itemId   = String(so.getSublistValue({ sublistId: 'item', fieldId: 'item',     line: i }) || '');
+
+                // For non-inventory lines (service, description, etc.) move freely
+                // For InvtPart lines — only move if stock exists at target
+                if (itemType === 'InvtPart') {
+                    const availableAtTarget = inventoryAtTarget[itemId] || 0;
+                    if (availableAtTarget <= 0) {
+                        log.debug('BILL SENDER LOC | LINE ' + i + ' SKIPPED — no stock at target', {
+                            itemId,
+                            targetLocId,
+                            targetLabel: LOC_LABEL[targetLocId]
+                        });
+                        continue;  // Leave this line at its current location
+                    }
+                }
+
+                const currentLineLoc = String(
+                    so.getSublistValue({ sublistId: 'item', fieldId: 'location', line: i }) || ''
+                );
+
+                // Skip if already at target
+                if (currentLineLoc === targetLocId) continue;
+
+                so.setSublistValue({ sublistId: 'item', fieldId: 'location',                    line: i, value: targetLocId });
+                so.setSublistValue({ sublistId: 'item', fieldId: 'custcol_jyswms_line_location', line: i, value: targetLocId });
+
+                log.debug('BILL SENDER LOC | LINE ' + i + ' UPDATED', {
+                    itemId,
+                    from: LOC_LABEL[currentLineLoc] || currentLineLoc,
+                    to:   LOC_LABEL[targetLocId]
+                });
+
+                anyLineUpdated = true;
+            }
+
+            // Update header only if at least one line was moved
+            if (anyLineUpdated) {
+                so.setValue({ fieldId: 'location', value: targetLocId });
+                log.error('BILL SENDER LOC | HEADER UPDATED', {
+                    soId,
+                    from: LOC_LABEL[currentHeaderLoc] || currentHeaderLoc,
+                    to:   LOC_LABEL[targetLocId]
+                });
+            } else {
+                log.error('BILL SENDER LOC | NO LINES MOVED — no stock at nearest WH', {
+                    soId,
+                    targetLocId,
+                    targetLabel: LOC_LABEL[targetLocId]
+                });
+            }
+
+            // ---- Always set guard flag so we never re-evaluate this order ----
+            so.setValue({ fieldId: 'custbody_bill_sender_order_location_up', value: true });
 
             so.save({
                 enableSourcing:        false,
                 ignoreMandatoryFields: true
             });
 
-            log.audit('BILL SENDER LOC | COMPLETE', {
+            log.error('BILL SENDER LOC | COMPLETE', {
                 soId,
-                linesUpdated: lineCount,
-                targetLoc:    LOC_LABEL[targetLocId],
-                state:        resolvedState || '(default)'
+                anyLineUpdated,
+                targetLoc : LOC_LABEL[targetLocId],
+                state     : resolvedState || '(default)'
             });
-
-            // =========================================================
-            // External API call — same pattern as Script 2.
-            // Build payload via autoLocUtil then POST to /update-dropship-lines.
-            // Fires always (even if no lines were moved).
-            // =========================================================
-            if (allItemIds.size) {
-
-                const dupPayload = {
-                    salesOrderHeaderId: soId,
-                    salesOrderItemId:   Array.from(allItemIds)
-                };
-
-                log.error('BILL SENDER LOC | CALLING DUP API', dupPayload);
-
-                const responseJson = autoLocUtil.getDropShipOrders_helperfunction(dupPayload, 1000, 0);
-
-                log.error('BILL SENDER LOC | DUP API RESPONSE', responseJson);
-
-                if (
-                    responseJson &&
-                    responseJson.data &&
-                    Object.keys(responseJson.data).length > 0
-                ) {
-                    log.error('BILL SENDER LOC | VALID DATA — CALLING SEND', responseJson.data);
-                    sendData(responseJson);
-                } else {
-                    log.error('BILL SENDER LOC | NO VALID DATA — SKIPPING SEND', responseJson);
-                }
-            }
 
         } catch (e) {
             log.error('BILL SENDER LOC | ERROR', e);

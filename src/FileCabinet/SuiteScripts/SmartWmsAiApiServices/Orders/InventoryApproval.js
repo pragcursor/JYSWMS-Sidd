@@ -487,9 +487,9 @@ define(['N/search', 'N/log', 'N/runtime', 'N/record'], function (search, log, ru
                     invadjsttranid: result.getValue({ name: "tranid", summary: "GROUP" }),
                     datecreated: result.getValue({ name: "datecreated", summary: "GROUP" }),
                     item: result.getText({ name: "item", summary: "GROUP" }),
-                    itemid: result.getValue({ name: "item", summary: "GROUP" }),
-                    binnumber: result.getText({ name: "binnumber", join: "inventoryDetail", summary: "GROUP" }),
-                    binid: result.getValue({ name: "binnumber", join: "inventoryDetail", summary: "GROUP" }),
+                    itemid: result.getValue({ name: "item", summary: "GROUP" }), 
+                    frombinnumber: result.getText({ name: "binnumber", join: "inventoryDetail", summary: "GROUP" }), // change to frombinnumber due to adityas request to have bin number field named as frombinnumber in the response
+                    frombinid: result.getValue({ name: "binnumber", join: "inventoryDetail", summary: "GROUP" }), // change to frombinid due to adityas request to have bin id field named as frombinid in the response
                     quantity: result.getValue({ name: "quantity", summary: "SUM" }),
                     location: result.getText({ name: "location", summary: "GROUP" }),
                     locationid: result.getValue({ name: "location", summary: "GROUP" }),
